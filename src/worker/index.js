@@ -40,11 +40,15 @@ const BUILDING_SCHEMA = {
     },
     walls: {
       type: "object", additionalProperties: false,
-      required: ["thickness", "material", "colorHex"],
+      required: ["thickness", "material", "colorHex", "openWalls"],
       properties: {
         thickness: { type: "number", description: "Wall thickness in metres (e.g. 0.15 timber, 0.2 masonry, 0.05 steel cladding)." },
         material: { type: "string", description: "Wall material description." },
         colorHex: { type: "string", description: "Hex colour for wall cladding, e.g. #c9c2b6." },
+        openWalls: {
+          type: "array", items: { type: "string", enum: ["front", "back", "left", "right"] },
+          description: "Walls that are fully OPEN (no cladding — only posts), e.g. a carport or pavilion. Use [] for a fully enclosed building.",
+        },
       },
     },
     openings: {
@@ -110,6 +114,7 @@ Rules:
 - Choose sensible real-world dimensions, materials, structural systems and a realistic bill of materials. Derive BOM quantities from the actual geometry you specify (perimeter, wall area, roof area, number of frames = length/baySpacing + 1, etc.).
 - Pick an appropriate structural system for the type & span (timber stud+truss for small residential, steel portal frame for sheds/warehouses, RC for heavy/tall).
 - Place doors and windows sensibly on the correct walls. front = -Z face, back = +Z, left = -X, right = +X. Use offset = -1 to auto-distribute multiple identical openings.
+- For open structures (carports, pavilions, open-sided sheds, awnings), list the open sides in walls.openWalls — those sides get posts but no cladding and no openings. Enclosed buildings use walls.openWalls = [].
 - For gable roofs the ridge usually runs parallel to the LONGER dimension. Skillion = mono-pitch. Give a small overhang (0.3–0.6m) unless flat.
 - Default to Australian standards & metric units unless the user names another country. Keep engineeringNotes concise and practical (spans, load assumptions, key connections).
 - Always return one complete design via the tool. Never omit required fields. If the user is vague, make reasonable professional assumptions and note them.

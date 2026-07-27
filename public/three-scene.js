@@ -16,6 +16,7 @@ function mats(spec) {
     slab: new THREE.MeshStandardMaterial({ color: "#8f8d88", roughness: 0.95 }),
     floor: new THREE.MeshStandardMaterial({ color: "#d8cfc0", roughness: 0.9 }),
     frame: new THREE.MeshStandardMaterial({ color: "#FF2D55", roughness: 0.4, metalness: 0.5 }),
+    post: new THREE.MeshStandardMaterial({ color: "#5a5d62", roughness: 0.5, metalness: 0.35 }),
   };
 }
 
@@ -172,23 +173,47 @@ export class Scene3D {
       (openingsByStorey[s] = openingsByStorey[s] || []).push(o);
     }
 
+    const openWalls = new Set(spec.walls?.openWalls || []);
+    const bay0 = Math.min(Math.max(spec.structure?.baySpacing || 3, 1.5), Math.max(2, L));
+    const addPosts = (along, fixed, isX, y0) => {
+      // posts evenly along an open wall; `along` = span length, `fixed` = the perpendicular coord
+      const np = Math.max(2, Math.round((isX ? W : L) / bay0) + 1);
+      const c = 0.09, span = isX ? W : L;
+      for (let i = 0; i < np; i++) {
+        const p = -span / 2 + (span * i) / (np - 1);
+        if (isX) this.building.add(box(p - c, p + c, y0, y0 + storeyH, fixed - c, fixed + c, M.post));
+        else this.building.add(box(fixed - c, fixed + c, y0, y0 + storeyH, p - c, p + c, M.post));
+      }
+    };
+
     for (let s = 0; s < storeys; s++) {
       const y0 = s * storeyH;
       if (s > 0) this.building.add(box(-hx, hx, y0 - 0.12, y0, -hz, hz, M.floor)); // upper floor slab
       const ops = openingsByStorey[s + 1] || [];
       const byWall = { front: [], back: [], left: [], right: [] };
       for (const o of ops) (byWall[o.wall] || byWall.front).push(o);
+      const eaveC = 0.1;
 
       // front (z=-hz) and back (z=+hz): run along X, length W
-      const front = buildWall(W, storeyH, t, 0, layoutOpenings(W, byWall.front), M);
-      front.position.set(-hx, y0, -hz); this.building.add(front);
-      const back = buildWall(W, storeyH, t, 0, layoutOpenings(W, byWall.back), M);
-      back.position.set(-hx, y0, hz); this.building.add(back);
+      for (const [wall, z] of [["front", -hz], ["back", hz]]) {
+        if (openWalls.has(wall)) {
+          addPosts(W, z, true, y0);
+          this.building.add(box(-hx, hx, y0 + storeyH - eaveC, y0 + storeyH + eaveC, z - eaveC, z + eaveC, M.post));
+        } else {
+          const wg = buildWall(W, storeyH, t, 0, layoutOpenings(W, byWall[wall]), M);
+          wg.position.set(-hx, y0, z); this.building.add(wg);
+        }
+      }
       // left (x=-hx) and right (x=+hx): run along Z, length L
-      const left = buildWall(L, storeyH, t, 0, layoutOpenings(L, byWall.left), M);
-      left.position.set(-hx, y0, -hz); left.rotation.y = -Math.PI / 2; this.building.add(left);
-      const right = buildWall(L, storeyH, t, 0, layoutOpenings(L, byWall.right), M);
-      right.position.set(hx, y0, -hz); right.rotation.y = -Math.PI / 2; this.building.add(right);
+      for (const [wall, x] of [["left", -hx], ["right", hx]]) {
+        if (openWalls.has(wall)) {
+          addPosts(L, x, false, y0);
+          this.building.add(box(x - eaveC, x + eaveC, y0 + storeyH - eaveC, y0 + storeyH + eaveC, -hz, hz, M.post));
+        } else {
+          const wg = buildWall(L, storeyH, t, 0, layoutOpenings(L, byWall[wall]), M);
+          wg.position.set(x, y0, -hz); wg.rotation.y = -Math.PI / 2; this.building.add(wg);
+        }
+      }
     }
 
     const wallTop = storeys * storeyH;

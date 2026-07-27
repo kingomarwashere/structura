@@ -80,10 +80,19 @@ export function floorPlanSVG(spec) {
     const X = (mx) => gx + mx * s;         // model x (0..W) -> paper
     const Y = (mz) => gy + mz * s;         // model z (0..L) -> paper (down)
     const ts = t * s;
+    const openWalls = new Set(spec.walls?.openWalls || []);
     let g = "";
-    // wall band (outer rect minus inner rect) via even-odd fill
-    g += `<path fill="${INK}" fill-rule="evenodd" d="M ${X(0)} ${Y(0)} H ${X(W)} V ${Y(L)} H ${X(0)} Z
-      M ${X(0) + ts} ${Y(0) + ts} V ${Y(L) - ts} H ${X(W) - ts} V ${Y(0) + ts} Z"/>`;
+    // walls drawn per-side so open sides can be omitted (carports/pavilions)
+    const sideRect = { front: [X(0), Y(0), W * s, ts], back: [X(0), Y(L) - ts, W * s, ts],
+      left: [X(0), Y(0), ts, L * s], right: [X(W) - ts, Y(0), ts, L * s] };
+    for (const wall of ["front", "back", "left", "right"]) {
+      const [rx, ry, rw, rh] = sideRect[wall];
+      if (openWalls.has(wall)) {
+        g += `<line x1="${rx}" y1="${ry}" x2="${rw > rh ? rx + rw : rx}" y2="${rw > rh ? ry : ry + rh}" stroke="${INK2}" stroke-width="1" stroke-dasharray="6 4"/>`;
+      } else {
+        g += `<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="${INK}"/>`;
+      }
+    }
     // openings — punch white gaps + symbols
     const ground = (spec.openings || []).filter(o => (o.storey || 1) === 1);
     const draw = (wall, arr) => {
@@ -182,10 +191,20 @@ function elevationSVG(spec, view) {
     // ground + hatch
     g += `<line x1="${ox + 30}" y1="${baseY}" x2="${ox + w - 30}" y2="${baseY}" stroke="${INK}" stroke-width="2"/>`;
     for (let x = ox + 34; x < ox + w - 34; x += 12) g += `<line x1="${x}" y1="${baseY}" x2="${x - 8}" y2="${baseY + 9}" stroke="${INK2}" stroke-width="0.7"/>`;
-    // wall body
-    g += `<rect x="${X(0)}" y="${V(wallTop)}" width="${faceWidth * s}" height="${wallTop * s}" fill="#eef0ec" stroke="${INK}" stroke-width="1.8"/>`;
-    // storey lines
-    for (let i = 1; i < storeys; i++) g += `<line x1="${X(0)}" y1="${V(i * storeyH)}" x2="${X(faceWidth)}" y2="${V(i * storeyH)}" stroke="${INK2}" stroke-width="0.7" stroke-dasharray="4 3"/>`;
+    // wall body — or posts if this side is open
+    const isOpen = (spec.walls?.openWalls || []).includes(view);
+    if (isOpen) {
+      const bay = Math.min(Math.max(spec.structure?.baySpacing || 3, 1.5), Math.max(2, faceWidth));
+      const np = Math.max(2, Math.round(faceWidth / bay) + 1);
+      for (let i = 0; i < np; i++) {
+        const u = (faceWidth * i) / (np - 1);
+        g += `<rect x="${X(u) - 3}" y="${V(wallTop)}" width="6" height="${wallTop * s}" fill="#d7dadf" stroke="${INK}" stroke-width="1.2"/>`;
+      }
+      g += `<rect x="${X(0)}" y="${V(wallTop) - 5}" width="${faceWidth * s}" height="9" fill="#d7dadf" stroke="${INK}" stroke-width="1.2"/>`;
+    } else {
+      g += `<rect x="${X(0)}" y="${V(wallTop)}" width="${faceWidth * s}" height="${wallTop * s}" fill="#eef0ec" stroke="${INK}" stroke-width="1.8"/>`;
+      for (let i = 1; i < storeys; i++) g += `<line x1="${X(0)}" y1="${V(i * storeyH)}" x2="${X(faceWidth)}" y2="${V(i * storeyH)}" stroke="${INK2}" stroke-width="0.7" stroke-dasharray="4 3"/>`;
+    }
     // roof outline
     const pts = prof.pts.map(([u, v]) => `${X(u)},${V(v)}`).join(" ");
     if (prof.slope !== undefined && prof.pts.length === 2) {
