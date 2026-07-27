@@ -14,6 +14,24 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--cream)
 #sidebar { background: var(--raised); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; min-height: 0; }
 #brand { padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+.brand-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.brand-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.brand-btns button { background: #1c1811; border: 1px solid var(--line); color: var(--cream);
+  font-family: var(--mono); font-size: 11px; padding: 5px 9px; border-radius: 7px; cursor: pointer; }
+.brand-btns button:hover { border-color: var(--red); color: var(--pink); }
+#designs-drawer { border-bottom: 1px solid var(--line); background: #0e0c08; max-height: 44vh; overflow-y: auto; }
+#designs-drawer[hidden] { display: none; }
+.dd-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px;
+  font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); position: sticky; top: 0; background: #0e0c08; }
+.dd-head button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; }
+.dd-item { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid #17140f; cursor: pointer; }
+.dd-item:hover { background: #14120d; }
+.dd-item .di-main { flex: 1; min-width: 0; }
+.dd-item .di-name { font-size: 13px; color: var(--cream); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dd-item .di-sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.dd-item .di-del { background: none; border: none; color: #7a5560; cursor: pointer; font-size: 12px; padding: 4px; flex-shrink: 0; }
+.dd-item .di-del:hover { color: var(--red); }
+.dd-empty { padding: 14px 16px; color: var(--muted); font-size: 12px; font-family: var(--mono); }
 .logo { font-family: var(--disp); font-weight: 800; font-size: 26px; letter-spacing: 1px;
   background: linear-gradient(90deg, var(--red), var(--gold)); -webkit-background-clip: text;
   background-clip: text; color: transparent; }

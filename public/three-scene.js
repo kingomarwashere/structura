@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLExporter } from "three/addons/exporters/STLExporter.js";
+import { wingsOf, perimeterRuns, layoutOpeningsOn, longestRunForFace } from "/geometry.js";
 
 const DEG = Math.PI / 180;
 
@@ -56,24 +57,6 @@ function buildWall(L, height, t, y0, openings, M) {
   }
   if (cursor < L - 1e-3) g.add(box(cursor, L, y0, y0 + height, -th, th, M.wall));
   return g;
-}
-
-// Assign centre positions to a wall's openings (auto-distribute when needed).
-function layoutOpenings(L, list) {
-  const out = [];
-  // group by identical spec to expand `count`
-  for (const o of list) {
-    const count = Math.max(1, o.count || 1);
-    const needsAuto = count > 1 || !(o.offset >= 0);
-    for (let i = 0; i < count; i++) {
-      let center;
-      if (needsAuto) center = (L * (i + 1)) / (count + 1);
-      else center = o.offset;
-      center = Math.min(Math.max(center, o.width / 2 + 0.15), L - o.width / 2 - 0.15);
-      out.push({ ...o, center });
-    }
-  }
-  return out;
 }
 
 function triPrism(pts, thickness, material) {
@@ -155,77 +138,84 @@ export class Scene3D {
     const M = mats(spec);
     this.M = M;
 
-    const W = Math.max(1, spec.footprint.width);
-    const L = Math.max(1, spec.footprint.length);
+    const { W, L, wings } = wingsOf(spec);
     const t = Math.min(Math.max(spec.walls?.thickness || 0.15, 0.05), 0.5);
     const storeyH = Math.max(2.1, spec.wallHeight || 3);
     const storeys = Math.min(Math.max(spec.storeys || 1, 1), 8);
-    const hx = W / 2, hz = L / 2;
+    const ox = -W / 2, oz = -L / 2;                 // offset that centres the bounding box
+    const runs = perimeterRuns(wings, W, L);
+    const openWalls = new Set(spec.walls?.openWalls || []);
+    const bay0 = Math.min(Math.max(spec.structure?.baySpacing || 3, 1.5), Math.max(2, L));
+    const eaveC = 0.1;
 
-    // Foundation
-    const found = box(-hx - 0.25, hx + 0.25, -0.35, 0, -hz - 0.25, hz + 0.25, M.slab);
-    this.building.add(found);
+    // Foundation slab per wing
+    for (const wg of wings)
+      this.building.add(box(ox + wg.x - 0.2, ox + wg.x + wg.w + 0.2, -0.35, 0, oz + wg.z - 0.2, oz + wg.z + wg.l + 0.2, M.slab));
 
-    // Per-storey walls + floors
     const openingsByStorey = {};
     for (const o of spec.openings || []) {
       const s = Math.min(Math.max(o.storey || 1, 1), storeys);
       (openingsByStorey[s] = openingsByStorey[s] || []).push(o);
     }
 
-    const openWalls = new Set(spec.walls?.openWalls || []);
-    const bay0 = Math.min(Math.max(spec.structure?.baySpacing || 3, 1.5), Math.max(2, L));
-    const addPosts = (along, fixed, isX, y0) => {
-      // posts evenly along an open wall; `along` = span length, `fixed` = the perpendicular coord
-      const np = Math.max(2, Math.round((isX ? W : L) / bay0) + 1);
-      const c = 0.09, span = isX ? W : L;
+    const placeWall = (run, y0, ops) => {
+      const wg = buildWall(run.length, storeyH, t, 0, layoutOpeningsOn(run.length, ops), M);
+      const [ix, iz] = run.inward;
+      if (run.orient === "h") wg.position.set(ox + run.x0, y0, oz + run.z0 + iz * t / 2);
+      else { wg.position.set(ox + run.x0 + ix * t / 2, y0, oz + run.z0); wg.rotation.y = -Math.PI / 2; }
+      this.building.add(wg);
+    };
+    const placePosts = (run, y0) => {
+      const [ix, iz] = run.inward, len = run.length, c = 0.09;
+      const np = Math.max(2, Math.round(len / bay0) + 1);
       for (let i = 0; i < np; i++) {
-        const p = -span / 2 + (span * i) / (np - 1);
-        if (isX) this.building.add(box(p - c, p + c, y0, y0 + storeyH, fixed - c, fixed + c, M.post));
-        else this.building.add(box(fixed - c, fixed + c, y0, y0 + storeyH, p - c, p + c, M.post));
+        const f = (len * i) / (np - 1);
+        const x = run.orient === "h" ? ox + run.x0 + f : ox + run.x0 + ix * t / 2;
+        const z = run.orient === "h" ? oz + run.z0 + iz * t / 2 : oz + run.z0 + f;
+        this.building.add(box(x - c, x + c, y0, y0 + storeyH, z - c, z + c, M.post));
       }
+      if (run.orient === "h") { const z = oz + run.z0 + iz * t / 2; this.building.add(box(ox + run.x0, ox + run.x1, y0 + storeyH - eaveC, y0 + storeyH + eaveC, z - eaveC, z + eaveC, M.post)); }
+      else { const x = ox + run.x0 + ix * t / 2; this.building.add(box(x - eaveC, x + eaveC, y0 + storeyH - eaveC, y0 + storeyH + eaveC, oz + run.z0, oz + run.z1, M.post)); }
     };
 
     for (let s = 0; s < storeys; s++) {
       const y0 = s * storeyH;
-      if (s > 0) this.building.add(box(-hx, hx, y0 - 0.12, y0, -hz, hz, M.floor)); // upper floor slab
+      if (s > 0) for (const wg of wings) this.building.add(box(ox + wg.x, ox + wg.x + wg.w, y0 - 0.12, y0, oz + wg.z, oz + wg.z + wg.l, M.floor));
       const ops = openingsByStorey[s + 1] || [];
-      const byWall = { front: [], back: [], left: [], right: [] };
-      for (const o of ops) (byWall[o.wall] || byWall.front).push(o);
-      const eaveC = 0.1;
-
-      // front (z=-hz) and back (z=+hz): run along X, length W
-      for (const [wall, z] of [["front", -hz], ["back", hz]]) {
-        if (openWalls.has(wall)) {
-          addPosts(W, z, true, y0);
-          this.building.add(box(-hx, hx, y0 + storeyH - eaveC, y0 + storeyH + eaveC, z - eaveC, z + eaveC, M.post));
-        } else {
-          const wg = buildWall(W, storeyH, t, 0, layoutOpenings(W, byWall[wall]), M);
-          wg.position.set(-hx, y0, z); this.building.add(wg);
-        }
+      const byFace = { front: [], back: [], left: [], right: [] };
+      for (const o of ops) (byFace[o.wall] || byFace.front).push(o);
+      const runOps = new Map();
+      for (const face of ["front", "back", "left", "right"]) {
+        if (!byFace[face].length || openWalls.has(face)) continue;
+        const run = longestRunForFace(runs, face);
+        if (run) runOps.set(run, byFace[face]);
       }
-      // left (x=-hx) and right (x=+hx): run along Z, length L
-      for (const [wall, x] of [["left", -hx], ["right", hx]]) {
-        if (openWalls.has(wall)) {
-          addPosts(L, x, false, y0);
-          this.building.add(box(x - eaveC, x + eaveC, y0 + storeyH - eaveC, y0 + storeyH + eaveC, -hz, hz, M.post));
-        } else {
-          const wg = buildWall(L, storeyH, t, 0, layoutOpenings(L, byWall[wall]), M);
-          wg.position.set(x, y0, -hz); wg.rotation.y = -Math.PI / 2; this.building.add(wg);
-        }
+      for (const run of runs) {
+        if (openWalls.has(run.face)) placePosts(run, y0);
+        else placeWall(run, y0, runOps.get(run) || []);
       }
     }
 
     const wallTop = storeys * storeyH;
-    this._buildRoof(spec, W, L, wallTop, M);
-    this._buildFrame(spec, W, L, wallTop, storeys, storeyH, M);
+    // Roof per wing (single-wing = respect the spec's ridgeAxis; multi-wing = ridge along each wing's longer axis)
+    let peak = wallTop;
+    for (const wg of wings) {
+      const grp = new THREE.Group();
+      const roof = wings.length === 1 ? (spec.roof || {}) : { ...(spec.roof || {}), ridgeAxis: wg.l >= wg.w ? "length" : "width" };
+      const p = this._roofForRect(roof, wg.w, wg.l, wallTop, M, grp);
+      grp.position.set(ox + wg.x + wg.w / 2, 0, oz + wg.z + wg.l / 2);
+      this.building.add(grp);
+      peak = Math.max(peak, p);
+    }
+    this.roofPeak = peak;
+    this._buildFrame(spec, W, L, wallTop, storeys, storeyH, M, wings, runs, ox, oz);
 
     this.frameGroup.visible = false;
     this._fit();
   }
 
-  _buildRoof(spec, W, L, wallTop, M) {
-    const r = spec.roof || {};
+  // Build a roof for a w×l rectangle centred at the target group's origin. Returns the peak height.
+  _roofForRect(r, W, L, wallTop, M, target) {
     const type = r.type || "gable";
     const o = Math.min(Math.max(r.overhang || 0.3, 0), 2);
     const pitch = Math.min(Math.max(r.pitchDeg || 0, 0), 60) * DEG;
@@ -233,41 +223,33 @@ export class Scene3D {
     const rt = 0.12; // roof panel thickness
 
     const addSlopePair = (spanHalf, depthHalf, axis) => {
-      // axis 'x' => ridge parallel to Z (slopes across X). axis 'z' => ridge parallel to X.
       const rise = spanHalf * Math.tan(pitch);
       const ridgeY = wallTop + rise;
-      const outer = spanHalf + o;                    // horizontal half-span to outer eave
-      const slopeLen = outer / Math.cos(pitch);      // rafter length along the slope
-      const depth = 2 * (depthHalf + o);             // extent parallel to the ridge
+      const outer = spanHalf + o;
+      const slopeLen = outer / Math.cos(pitch);
+      const depth = 2 * (depthHalf + o);
       const eaveOuterY = wallTop - o * Math.tan(pitch);
       const midY = (eaveOuterY + ridgeY) / 2;
       for (const sign of [-1, 1]) {
         const geo = axis === "x"
-          ? new THREE.BoxGeometry(slopeLen, rt, depth)   // slope length along X
-          : new THREE.BoxGeometry(depth, rt, slopeLen);  // slope length along Z
+          ? new THREE.BoxGeometry(slopeLen, rt, depth)
+          : new THREE.BoxGeometry(depth, rt, slopeLen);
         const mesh = new THREE.Mesh(geo, M.roof);
-        if (axis === "x") {
-          mesh.rotation.z = -sign * pitch;               // +X end rises toward ridge at x=0
-          mesh.position.set(sign * outer / 2, midY, 0);
-        } else {
-          mesh.rotation.x = sign * pitch;
-          mesh.position.set(0, midY, sign * outer / 2);
-        }
-        this.building.add(mesh);
+        if (axis === "x") { mesh.rotation.z = -sign * pitch; mesh.position.set(sign * outer / 2, midY, 0); }
+        else { mesh.rotation.x = sign * pitch; mesh.position.set(0, midY, sign * outer / 2); }
+        target.add(mesh);
       }
       return { rise, ridgeY };
     };
 
     if (type === "flat") {
-      this.building.add(box(-hx - o, hx + o, wallTop, wallTop + rt, -hz - o, hz + o, M.roof));
-      // low parapet
+      target.add(box(-hx - o, hx + o, wallTop, wallTop + rt, -hz - o, hz + o, M.roof));
       const p = 0.4;
-      this.building.add(box(-hx, hx, wallTop + rt, wallTop + p, -hz, -hz + 0.12, M.wall));
-      this.building.add(box(-hx, hx, wallTop + rt, wallTop + p, hz - 0.12, hz, M.wall));
-      this.building.add(box(-hx, -hx + 0.12, wallTop + rt, wallTop + p, -hz, hz, M.wall));
-      this.building.add(box(hx - 0.12, hx, wallTop + rt, wallTop + p, -hz, hz, M.wall));
-      this.roofPeak = wallTop + p;
-      return;
+      target.add(box(-hx, hx, wallTop + rt, wallTop + p, -hz, -hz + 0.12, M.wall));
+      target.add(box(-hx, hx, wallTop + rt, wallTop + p, hz - 0.12, hz, M.wall));
+      target.add(box(-hx, -hx + 0.12, wallTop + rt, wallTop + p, -hz, hz, M.wall));
+      target.add(box(hx - 0.12, hx, wallTop + rt, wallTop + p, -hz, hz, M.wall));
+      return wallTop + p;
     }
 
     if (type === "skillion") {
@@ -281,46 +263,40 @@ export class Scene3D {
       const midY = wallTop + rise / 2;
       if (alongZ) { mesh.rotation.x = -pitch; mesh.position.set(0, midY, 0); }
       else { mesh.rotation.z = pitch; mesh.position.set(0, midY, 0); }
-      this.building.add(mesh);
-      // triangular gable infills on the two high-side walls
-      this.roofPeak = wallTop + rise;
-      return;
+      target.add(mesh);
+      return wallTop + rise;
     }
 
-    if (type === "hip") { this._hipRoof(W, L, wallTop, o, pitch, M); return; }
+    if (type === "hip") return this._hipRoof(W, L, wallTop, o, pitch, M, target);
 
     // gable
     const ridgeAlongZ = (r.ridgeAxis || (L >= W ? "length" : "width")) === "length";
     if (ridgeAlongZ) {
       const { ridgeY } = addSlopePair(hx, hz, "x");
-      // gable triangles on front/back (z = ±hz), spanning X
       const tri = [[-hx, wallTop], [hx, wallTop], [0, ridgeY]];
-      const gf = triPrism(tri, 0.12, M.wall); gf.position.z = -hz; this.building.add(gf);
-      const gb = triPrism(tri, 0.12, M.wall); gb.position.z = hz; this.building.add(gb);
-      this.roofPeak = ridgeY;
+      const gf = triPrism(tri, 0.12, M.wall); gf.position.z = -hz; target.add(gf);
+      const gb = triPrism(tri, 0.12, M.wall); gb.position.z = hz; target.add(gb);
+      return ridgeY;
     } else {
       const { ridgeY } = addSlopePair(hz, hx, "z");
       const tri = [[-hz, wallTop], [hz, wallTop], [0, ridgeY]];
-      const gl = triPrism(tri, 0.12, M.wall); gl.rotation.y = Math.PI / 2; gl.position.x = -hx; this.building.add(gl);
-      const gr = triPrism(tri, 0.12, M.wall); gr.rotation.y = Math.PI / 2; gr.position.x = hx; this.building.add(gr);
-      this.roofPeak = ridgeY;
+      const gl = triPrism(tri, 0.12, M.wall); gl.rotation.y = Math.PI / 2; gl.position.x = -hx; target.add(gl);
+      const gr = triPrism(tri, 0.12, M.wall); gr.rotation.y = Math.PI / 2; gr.position.x = hx; target.add(gr);
+      return ridgeY;
     }
   }
 
-  _hipRoof(W, L, wallTop, o, pitch, M) {
+  _hipRoof(W, L, wallTop, o, pitch, M, target) {
     const hx = W / 2 + o, hz = L / 2 + o;
-    const shortHalf = Math.min(hx, hz);
     const rise = (Math.min(W, L) / 2) * Math.tan(pitch);
     const ridgeY = wallTop + rise;
     const alongZ = L >= W;
     const ridgeHalf = Math.max(0.01, (Math.max(W, L) - Math.min(W, L)) / 2);
-    // eave corners (y=wallTop) and two ridge points (y=ridgeY)
-    const v = [];
     const eave = [[-hx, wallTop, -hz], [hx, wallTop, -hz], [hx, wallTop, hz], [-hx, wallTop, hz]];
     let ridgeA, ridgeB;
     if (alongZ) { ridgeA = [0, ridgeY, -ridgeHalf]; ridgeB = [0, ridgeY, ridgeHalf]; }
     else { ridgeA = [-ridgeHalf, ridgeY, 0]; ridgeB = [ridgeHalf, ridgeY, 0]; }
-    const all = [...eave, ridgeA, ridgeB]; // idx 0..3 eave, 4=A,5=B
+    const all = [...eave, ridgeA, ridgeB];
     const faces = alongZ
       ? [[0, 1, 4], [1, 2, 5, 4], [2, 3, 5], [3, 0, 4, 5]]
       : [[0, 1, 5, 4], [1, 2, 5], [2, 3, 4, 5], [3, 0, 4]];
@@ -333,13 +309,31 @@ export class Scene3D {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     geo.computeVertexNormals();
-    this.building.add(new THREE.Mesh(geo, M.roof));
-    this.roofPeak = ridgeY;
+    target.add(new THREE.Mesh(geo, M.roof));
+    return ridgeY;
   }
 
-  _buildFrame(spec, W, L, wallTop, storeys, storeyH, M) {
+  _buildFrame(spec, W, L, wallTop, storeys, storeyH, M, wings, runs, ox, oz) {
     const st = spec.structure || {};
     const bay = Math.min(Math.max(st.baySpacing || 3, 1.5), Math.max(2, L));
+
+    // Non-rectangular footprint: columns along the perimeter runs + a top perimeter beam.
+    if (wings && wings.length > 1) {
+      const c = 0.13;
+      for (const run of runs) {
+        const len = run.length, np = Math.max(2, Math.round(len / bay) + 1);
+        for (let i = 0; i < np; i++) {
+          const f = (len * i) / (np - 1);
+          const x = run.orient === "h" ? ox + run.x0 + f : ox + run.x0;
+          const z = run.orient === "h" ? oz + run.z0 : oz + run.z0 + f;
+          this.frameGroup.add(box(x - c, x + c, 0, wallTop, z - c, z + c, M.frame));
+        }
+        if (run.orient === "h") this.frameGroup.add(box(ox + run.x0, ox + run.x1, wallTop - c, wallTop + c, oz + run.z0 - c, oz + run.z0 + c, M.frame));
+        else this.frameGroup.add(box(ox + run.x0 - c, ox + run.x0 + c, wallTop - c, wallTop + c, oz + run.z0, oz + run.z1, M.frame));
+      }
+      return;
+    }
+
     const n = Math.max(2, Math.round(L / bay) + 1);
     const hx = W / 2, hz = L / 2;
     const c = 0.14; // member half-size

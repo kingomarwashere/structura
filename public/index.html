@@ -22,9 +22,22 @@
 <div id="app">
   <aside id="sidebar">
     <header id="brand">
-      <div class="logo">STRUCTURA</div>
-      <div class="tag">AI structural designer · <span>A Radical Party Project</span></div>
+      <div class="brand-top">
+        <div>
+          <div class="logo">STRUCTURA</div>
+          <div class="tag">AI structural designer · <span>A Radical Party Project</span></div>
+        </div>
+        <div class="brand-btns">
+          <button id="btn-new" title="Start a new design">+ New</button>
+          <button id="btn-designs" title="Your saved designs">Saved</button>
+        </div>
+      </div>
     </header>
+
+    <div id="designs-drawer" hidden>
+      <div class="dd-head">Saved designs <button id="dd-close">✕</button></div>
+      <div id="dd-list"></div>
+    </div>
 
     <div id="chat"></div>
 
@@ -55,6 +68,7 @@
       <div id="toolbar">
         <label class="chk"><input type="checkbox" id="toggle-frame" /> Frame</label>
         <button id="btn-stl" class="tool" title="Download 3D model (STL)">STL</button>
+        <button id="btn-dxf" class="tool" title="Download CAD floor plan (DXF)">DXF</button>
         <button id="btn-print" class="tool" title="Print blueprint sheet">Print</button>
         <button id="btn-csv" class="tool" title="Download parts list (CSV)">CSV</button>
         <button id="btn-json" class="tool" title="Download design spec (JSON)">JSON</button>

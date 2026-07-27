@@ -20,10 +20,23 @@ const BUILDING_SCHEMA = {
     buildingType: { type: "string", description: "e.g. shed, house, warehouse, carport, barn, workshop, cabin, pavilion, bridge, water tank." },
     units: { type: "string", enum: ["m"], description: "All lengths are metres." },
     footprint: {
-      type: "object", additionalProperties: false, required: ["width", "length"],
+      type: "object", additionalProperties: false, required: ["width", "length", "wings"],
       properties: {
-        width: { type: "number", description: "Overall width in metres (X axis / front face width)." },
-        length: { type: "number", description: "Overall depth in metres (Z axis)." },
+        width: { type: "number", description: "Overall bounding width in metres (X axis / front face width)." },
+        length: { type: "number", description: "Overall bounding depth in metres (Z axis)." },
+        wings: {
+          type: "array",
+          description: "For NON-rectangular buildings (L, T, U, cross shapes), the rectangular wings whose UNION forms the footprint. Each wing is positioned inside the width×length bounding box. Leave EMPTY ([]) for a plain rectangular building.",
+          items: {
+            type: "object", additionalProperties: false, required: ["x", "z", "width", "length"],
+            properties: {
+              x: { type: "number", description: "Wing near corner X offset from origin (0..width)." },
+              z: { type: "number", description: "Wing near corner Z offset from origin (0..length)." },
+              width: { type: "number", description: "Wing width along X (m)." },
+              length: { type: "number", description: "Wing depth along Z (m)." },
+            },
+          },
+        },
       },
     },
     storeys: { type: "integer", minimum: 1, maximum: 8, description: "Number of storeys/levels." },
@@ -115,16 +128,70 @@ Rules:
 - Pick an appropriate structural system for the type & span (timber stud+truss for small residential, steel portal frame for sheds/warehouses, RC for heavy/tall).
 - Place doors and windows sensibly on the correct walls. front = -Z face, back = +Z, left = -X, right = +X. Use offset = -1 to auto-distribute multiple identical openings.
 - For open structures (carports, pavilions, open-sided sheds, awnings), list the open sides in walls.openWalls — those sides get posts but no cladding and no openings. Enclosed buildings use walls.openWalls = [].
+- For L-shaped, T-shaped, U-shaped or cross-shaped buildings, set footprint.wings to the rectangular wings whose union is the plan (each wing positioned within the width×length bounding box). A simple rectangle uses footprint.wings = []. Example L-shape in a 12×10 box: wings = [{x:0,z:0,width:12,length:5},{x:0,z:5,width:6,length:5}].
 - For gable roofs the ridge usually runs parallel to the LONGER dimension. Skillion = mono-pitch. Give a small overhang (0.3–0.6m) unless flat.
 - Default to Australian standards & metric units unless the user names another country. Keep engineeringNotes concise and practical (spans, load assumptions, key connections).
 - Always return one complete design via the tool. Never omit required fields. If the user is vague, make reasonable professional assumptions and note them.
 - When given an existing design plus an edit request, return the FULL updated design (not a diff), preserving unchanged aspects.`;
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
+    headers: { "content-type": "application/json", "cache-control": "no-store", ...(extraHeaders || {}) },
   });
+}
+
+// Anonymous per-browser id from the structura_uid cookie (created on first use).
+function getUid(request) {
+  const cookie = request.headers.get("cookie") || "";
+  const m = cookie.match(/(?:^|;\s*)structura_uid=([a-f0-9-]{36})/);
+  return m ? m[1] : null;
+}
+function uidCookie(uid) {
+  return { "set-cookie": `structura_uid=${uid}; Path=/; Max-Age=31536000; SameSite=Lax` };
+}
+
+async function handleDesignsList(request, env, uid) {
+  if (!uid) return json({ designs: [] });
+  const { results } = await env.DB.prepare(
+    "SELECT id, name, building_type, updated_at FROM designs WHERE uid = ? ORDER BY updated_at DESC LIMIT 100"
+  ).bind(uid).all();
+  return json({ designs: results || [] });
+}
+
+async function handleDesignGet(env, uid, id) {
+  const row = await env.DB.prepare("SELECT spec FROM designs WHERE id = ? AND uid = ?").bind(id, uid).first();
+  if (!row) return json({ error: "Not found" }, 404);
+  return json({ spec: JSON.parse(row.spec) });
+}
+
+async function handleDesignSave(request, env, uid, setCookie) {
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
+  if (!body.spec) return json({ error: "Missing spec" }, 400);
+  const now = Date.now();
+  const name = (body.spec.name || "Untitled").toString().slice(0, 120);
+  const btype = (body.spec.buildingType || "").toString().slice(0, 60);
+  const specStr = JSON.stringify(body.spec);
+  const prompt = (body.prompt || "").toString().slice(0, 2000);
+  const headers = setCookie ? uidCookie(uid) : undefined;
+  if (body.id) {
+    const owned = await env.DB.prepare("SELECT id FROM designs WHERE id = ? AND uid = ?").bind(body.id, uid).first();
+    if (owned) {
+      await env.DB.prepare("UPDATE designs SET name=?, building_type=?, prompt=?, spec=?, updated_at=? WHERE id=? AND uid=?")
+        .bind(name, btype, prompt, specStr, now, body.id, uid).run();
+      return json({ id: body.id }, 200, headers);
+    }
+  }
+  const id = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO designs (id, uid, name, building_type, prompt, spec, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)")
+    .bind(id, uid, name, btype, prompt, specStr, now, now).run();
+  return json({ id }, 200, headers);
+}
+
+async function handleDesignDelete(env, uid, id) {
+  await env.DB.prepare("DELETE FROM designs WHERE id = ? AND uid = ?").bind(id, uid).run();
+  return json({ ok: true });
 }
 
 async function handleDesign(request, env) {
@@ -181,12 +248,28 @@ async function handleDesign(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/api/design" && request.method === "POST") {
-      return handleDesign(request, env);
+    const path = url.pathname;
+
+    if (path === "/api/design" && request.method === "POST") return handleDesign(request, env);
+    if (path === "/api/health") return json({ ok: true, model: MODEL });
+
+    // Saved designs (D1) — anonymous uid cookie, created on first save.
+    if (path === "/api/designs" || path.startsWith("/api/designs/")) {
+      let uid = getUid(request), fresh = false;
+      if (!uid) { uid = crypto.randomUUID(); fresh = true; }
+      const idMatch = path.match(/^\/api\/designs\/([a-f0-9-]{36})$/);
+      try {
+        if (path === "/api/designs" && request.method === "GET") return await handleDesignsList(request, env, getUid(request));
+        if (path === "/api/designs" && request.method === "POST") return await handleDesignSave(request, env, uid, fresh);
+        if (idMatch && request.method === "GET") return await handleDesignGet(env, uid, idMatch[1]);
+        if (idMatch && request.method === "DELETE") return await handleDesignDelete(env, uid, idMatch[1]);
+      } catch (e) {
+        return json({ error: "DB error: " + e.message }, 500);
+      }
+      return json({ error: "Not found" }, 404);
     }
-    if (url.pathname === "/api/health") return json({ ok: true, model: MODEL });
-    if (url.pathname.startsWith("/api/")) return json({ error: "Not found" }, 404);
-    // Everything else -> static assets
+
+    if (path.startsWith("/api/")) return json({ error: "Not found" }, 404);
     return env.ASSETS.fetch(request);
   },
 };

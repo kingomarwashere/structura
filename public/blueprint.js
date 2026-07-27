@@ -1,4 +1,5 @@
 // Generates blueprint-style SVG sheets (floor plan + elevations) from a building spec.
+import { wingsOf, perimeterRuns, layoutOpeningsOn, longestRunForFace } from "/geometry.js";
 const NS = "http://www.w3.org/2000/svg";
 const INK = "#1b2a44", INK2 = "#4a5b78", RED = "#c0304c", PAPER = "#f7f5ef", GRIDC = "#c7d0dd";
 
@@ -79,61 +80,74 @@ export function floorPlanSVG(spec) {
     const gx = ox + (w - W * s) / 2, gy = oy + (h - L * s) / 2;
     const X = (mx) => gx + mx * s;         // model x (0..W) -> paper
     const Y = (mz) => gy + mz * s;         // model z (0..L) -> paper (down)
-    const ts = t * s;
     const openWalls = new Set(spec.walls?.openWalls || []);
+    const { wings } = wingsOf(spec);
+    const runs = perimeterRuns(wings, W, L);
     let g = "";
-    // walls drawn per-side so open sides can be omitted (carports/pavilions)
-    const sideRect = { front: [X(0), Y(0), W * s, ts], back: [X(0), Y(L) - ts, W * s, ts],
-      left: [X(0), Y(0), ts, L * s], right: [X(W) - ts, Y(0), ts, L * s] };
-    for (const wall of ["front", "back", "left", "right"]) {
-      const [rx, ry, rw, rh] = sideRect[wall];
-      if (openWalls.has(wall)) {
-        g += `<line x1="${rx}" y1="${ry}" x2="${rw > rh ? rx + rw : rx}" y2="${rw > rh ? ry : ry + rh}" stroke="${INK2}" stroke-width="1" stroke-dasharray="6 4"/>`;
-      } else {
-        g += `<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="${INK}"/>`;
+    const cross = (px, py) => `<circle cx="${px}" cy="${py}" r="4.5" fill="none" stroke="${RED}" stroke-width="1.2"/><line x1="${px - 3}" y1="${py}" x2="${px + 3}" y2="${py}" stroke="${RED}" stroke-width="0.8"/><line x1="${px}" y1="${py - 3}" x2="${px}" y2="${py + 3}" stroke="${RED}" stroke-width="0.8"/>`;
+
+    // walls — a band per perimeter run, offset inward by t (open sides = dashed line)
+    for (const r of runs) {
+      const [ix, iz] = r.inward;
+      if (openWalls.has(r.face)) {
+        g += `<line x1="${X(r.x0)}" y1="${Y(r.z0)}" x2="${X(r.x1)}" y2="${Y(r.z1)}" stroke="${INK2}" stroke-width="1" stroke-dasharray="6 4"/>`;
+        continue;
       }
+      const xa = X(r.x0), za = Y(r.z0);
+      const xb = r.orient === "h" ? X(r.x1) : X(r.x0 + ix * t);
+      const zb = r.orient === "h" ? Y(r.z0 + iz * t) : Y(r.z1);
+      g += `<rect x="${Math.min(xa, xb)}" y="${Math.min(za, zb)}" width="${Math.abs(xb - xa)}" height="${Math.abs(zb - za)}" fill="${INK}"/>`;
     }
-    // openings — punch white gaps + symbols
+
+    // openings — routed to each face's longest run, punched + drawn with symbols
     const ground = (spec.openings || []).filter(o => (o.storey || 1) === 1);
-    const draw = (wall, arr) => {
-      for (const o of expandOpenings(wall === "front" || wall === "back" ? W : L, arr)) {
-        let x1, y1, x2, y2, horiz;
-        if (wall === "front") { horiz = true; x1 = X(o.center - o.width / 2); x2 = X(o.center + o.width / 2); y1 = Y(0); y2 = Y(0) + ts; }
-        else if (wall === "back") { horiz = true; x1 = X(o.center - o.width / 2); x2 = X(o.center + o.width / 2); y1 = Y(L) - ts; y2 = Y(L); }
-        else if (wall === "left") { horiz = false; y1 = Y(o.center - o.width / 2); y2 = Y(o.center + o.width / 2); x1 = X(0); x2 = X(0) + ts; }
-        else { horiz = false; y1 = Y(o.center - o.width / 2); y2 = Y(o.center + o.width / 2); x1 = X(W) - ts; x2 = X(W); }
-        g += `<rect x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}" width="${Math.abs(x2 - x1)}" height="${Math.abs(y2 - y1)}" fill="${PAPER}"/>`;
-        const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+    const byFace = { front: [], back: [], left: [], right: [] };
+    for (const o of ground) (byFace[o.wall] || byFace.front).push(o);
+    for (const face of ["front", "back", "left", "right"]) {
+      if (!byFace[face].length || openWalls.has(face)) continue;
+      const run = longestRunForFace(runs, face);
+      if (!run) continue;
+      const horiz = run.orient === "h", [ix, iz] = run.inward;
+      const start = horiz ? run.x0 : run.z0;
+      for (const o of layoutOpeningsOn(run.length, byFace[face])) {
+        const a = start + o.center - o.width / 2, b = start + o.center + o.width / 2, wpx = o.width * s;
+        let rx, ry, rw, rh;
+        if (horiz) { const xa = X(a), xb = X(b), y0 = Y(run.z0), y1 = Y(run.z0 + iz * t); rx = Math.min(xa, xb); ry = Math.min(y0, y1); rw = Math.abs(xb - xa); rh = Math.abs(y1 - y0); }
+        else { const ya = Y(a), yb = Y(b), x0 = X(run.x0), x1 = X(run.x0 + ix * t); rx = Math.min(x0, x1); ry = Math.min(ya, yb); rw = Math.abs(x1 - x0); rh = Math.abs(yb - ya); }
+        g += `<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="${PAPER}"/>`;
         if (o.type === "window") {
-          g += horiz
-            ? `<line x1="${Math.min(x1, x2)}" y1="${cy}" x2="${Math.max(x1, x2)}" y2="${cy}" stroke="${INK}" stroke-width="1.4"/>`
-            : `<line x1="${cx}" y1="${Math.min(y1, y2)}" x2="${cx}" y2="${Math.max(y1, y2)}" stroke="${INK}" stroke-width="1.4"/>`;
+          g += horiz ? `<line x1="${X(a)}" y1="${ry + rh / 2}" x2="${X(b)}" y2="${ry + rh / 2}" stroke="${INK}" stroke-width="1.4"/>`
+                     : `<line x1="${rx + rw / 2}" y1="${Y(a)}" x2="${rx + rw / 2}" y2="${Y(b)}" stroke="${INK}" stroke-width="1.4"/>`;
         } else if (o.type === "door") {
-          const wpx = o.width * s;
-          if (wall === "front") g += `<line x1="${X(o.center - o.width / 2)}" y1="${Y(0)}" x2="${X(o.center - o.width / 2)}" y2="${Y(0) + wpx}" stroke="${INK}" stroke-width="1.4"/><path d="M ${X(o.center - o.width / 2)} ${Y(0) + wpx} A ${wpx} ${wpx} 0 0 1 ${X(o.center + o.width / 2)} ${Y(0)}" fill="none" stroke="${INK2}" stroke-width="0.8"/>`;
-          else if (wall === "back") g += `<line x1="${X(o.center - o.width / 2)}" y1="${Y(L)}" x2="${X(o.center - o.width / 2)}" y2="${Y(L) - wpx}" stroke="${INK}" stroke-width="1.4"/><path d="M ${X(o.center - o.width / 2)} ${Y(L) - wpx} A ${wpx} ${wpx} 0 0 0 ${X(o.center + o.width / 2)} ${Y(L)}" fill="none" stroke="${INK2}" stroke-width="0.8"/>`;
-          else if (wall === "left") g += `<line x1="${X(0)}" y1="${Y(o.center - o.width / 2)}" x2="${X(0) + wpx}" y2="${Y(o.center - o.width / 2)}" stroke="${INK}" stroke-width="1.4"/><path d="M ${X(0) + wpx} ${Y(o.center - o.width / 2)} A ${wpx} ${wpx} 0 0 0 ${X(0)} ${Y(o.center + o.width / 2)}" fill="none" stroke="${INK2}" stroke-width="0.8"/>`;
-          else g += `<line x1="${X(W)}" y1="${Y(o.center - o.width / 2)}" x2="${X(W) - wpx}" y2="${Y(o.center - o.width / 2)}" stroke="${INK}" stroke-width="1.4"/><path d="M ${X(W) - wpx} ${Y(o.center - o.width / 2)} A ${wpx} ${wpx} 0 0 1 ${X(W)} ${Y(o.center + o.width / 2)}" fill="none" stroke="${INK2}" stroke-width="0.8"/>`;
-        } else { // roller / garage / opening
-          g += `<rect x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}" width="${Math.abs(x2 - x1)}" height="${Math.abs(y2 - y1)}" fill="none" stroke="${INK2}" stroke-width="1" stroke-dasharray="3 2"/>`;
+          if (horiz) { const hx = X(a), hy = Y(run.z0), ly = Y(run.z0 + iz * o.width);
+            g += `<line x1="${hx}" y1="${hy}" x2="${hx}" y2="${ly}" stroke="${INK}" stroke-width="1.4"/><path d="M ${hx} ${ly} A ${wpx} ${wpx} 0 0 ${iz > 0 ? 1 : 0} ${X(b)} ${hy}" fill="none" stroke="${INK2}" stroke-width="0.8"/>`; }
+          else { const hx = X(run.x0), hy = Y(a), lx = X(run.x0 + ix * o.width);
+            g += `<line x1="${hx}" y1="${hy}" x2="${lx}" y2="${hy}" stroke="${INK}" stroke-width="1.4"/><path d="M ${lx} ${hy} A ${wpx} ${wpx} 0 0 ${ix > 0 ? 0 : 1} ${hx} ${Y(b)}" fill="none" stroke="${INK2}" stroke-width="0.8"/>`; }
+        } else {
+          g += `<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="none" stroke="${INK2}" stroke-width="1" stroke-dasharray="3 2"/>`;
         }
       }
-    };
-    const byWall = { front: [], back: [], left: [], right: [] };
-    for (const o of ground) (byWall[o.wall] || byWall.front).push(o);
-    draw("front", byWall.front); draw("back", byWall.back); draw("left", byWall.left); draw("right", byWall.right);
+    }
 
     // structural column grid
     const bay = Math.min(Math.max(spec.structure?.baySpacing || 3, 1.5), Math.max(2, L));
-    const n = Math.max(2, Math.round(L / bay) + 1);
-    for (let i = 0; i < n; i++) {
-      const mz = (L * i) / (n - 1);
-      for (const mx of [0, W]) {
-        g += `<circle cx="${X(mx)}" cy="${Y(mz)}" r="4.5" fill="none" stroke="${RED}" stroke-width="1.2"/><line x1="${X(mx) - 3}" y1="${Y(mz)}" x2="${X(mx) + 3}" y2="${Y(mz)}" stroke="${RED}" stroke-width="0.8"/><line x1="${X(mx)}" y1="${Y(mz) - 3}" x2="${X(mx)}" y2="${Y(mz) + 3}" stroke="${RED}" stroke-width="0.8"/>`;
+    if (wings.length === 1) {
+      const n = Math.max(2, Math.round(L / bay) + 1);
+      for (let i = 0; i < n; i++) {
+        const mz = (L * i) / (n - 1);
+        for (const mx of [0, W]) g += cross(X(mx), Y(mz));
+        g += `<text x="${X(0) - 26}" y="${Y(mz) + 4}" fill="${INK2}" font-size="11" text-anchor="middle">${i + 1}</text>`;
       }
-      g += `<text x="${X(0) - 26}" y="${Y(mz) + 4}" fill="${INK2}" font-size="11" text-anchor="middle">${i + 1}</text>`;
+      g += `<text x="${X(0)}" y="${Y(L) + 40}" fill="${INK2}" font-size="11">A</text><text x="${X(W)}" y="${Y(L) + 40}" fill="${INK2}" font-size="11">B</text>`;
+    } else {
+      for (const r of runs) {
+        const np = Math.max(2, Math.round(r.length / bay) + 1);
+        for (let i = 0; i < np; i++) {
+          const f = (r.length * i) / (np - 1);
+          g += cross(r.orient === "h" ? X(r.x0 + f) : X(r.x0), r.orient === "h" ? Y(r.z0) : Y(r.z0 + f));
+        }
+      }
     }
-    g += `<text x="${X(0)}" y="${Y(L) + 40}" fill="${INK2}" font-size="11">A</text><text x="${X(W)}" y="${Y(L) + 40}" fill="${INK2}" font-size="11">B</text>`;
 
     // dimensions
     g += hDim(X(0), X(W), Y(L) + 44, fmt(W) + " m");

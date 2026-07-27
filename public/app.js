@@ -1,9 +1,10 @@
 import { Scene3D } from "/three-scene.js";
 import { floorPlanSVG, elevationsSVG } from "/blueprint.js";
+import { toDXF } from "/dxf.js";
 
 const $ = (s) => document.querySelector(s);
 const chat = $("#chat"), promptEl = $("#prompt"), sendBtn = $("#send");
-let scene = null, spec = null, busy = false;
+let scene = null, spec = null, busy = false, currentId = null;
 
 function addMsg(kind, html) {
   const el = document.createElement("div");
@@ -39,6 +40,7 @@ async function design(prompt) {
     render(spec);
     addMsg("bot", escapeHtml(spec.summary || "Design ready.") +
       `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m · ${escapeHtml(spec.structure?.system || "")}</div>`);
+    saveDesign(prompt);
   } catch (e) {
     addMsg("err", "Couldn't generate that design: " + escapeHtml(e.message));
   } finally {
@@ -112,8 +114,85 @@ document.querySelectorAll(".ex").forEach(b => b.addEventListener("click", () => 
 $("#toggle-frame").addEventListener("change", (e) => scene && scene.setFrameVisible(e.target.checked));
 $("#btn-stl").addEventListener("click", () => { if (scene) download(scene.exportSTL(), slug(spec) + ".stl"); });
 $("#btn-json").addEventListener("click", () => { if (spec) download(new Blob([JSON.stringify(spec, null, 2)], { type: "application/json" }), slug(spec) + ".json"); });
+$("#btn-dxf").addEventListener("click", () => { if (spec) download(new Blob([toDXF(spec)], { type: "application/dxf" }), slug(spec) + "-plan.dxf"); });
 $("#btn-csv").addEventListener("click", () => { if (spec) download(new Blob([toCSV(spec)], { type: "text/csv" }), slug(spec) + "-bom.csv"); });
 $("#btn-print").addEventListener("click", printSheets);
+
+// ---- saved designs (D1) ----
+async function saveDesign(prompt) {
+  try {
+    const res = await fetch("/api/designs", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: currentId, spec, prompt }),
+    });
+    const data = await res.json();
+    if (data.id) currentId = data.id;
+    if (!$("#designs-drawer").hidden) loadDesignsList();
+  } catch { /* non-fatal */ }
+}
+
+async function loadDesignsList() {
+  const list = $("#dd-list");
+  try {
+    const res = await fetch("/api/designs");
+    const { designs } = await res.json();
+    if (!designs || !designs.length) { list.innerHTML = `<div class="dd-empty">No saved designs yet. Design something to save it here.</div>`; return; }
+    list.innerHTML = designs.map(d => `
+      <div class="dd-item" data-id="${d.id}">
+        <div class="di-main">
+          <div class="di-name">${escapeHtml(d.name || "Untitled")}${currentId === d.id ? " ·" : ""}</div>
+          <div class="di-sub">${escapeHtml(d.building_type || "")} · ${new Date(d.updated_at).toLocaleDateString()}</div>
+        </div>
+        <button class="di-del" data-del="${d.id}" title="Delete">🗑</button>
+      </div>`).join("");
+  } catch { list.innerHTML = `<div class="dd-empty">Couldn't load saved designs.</div>`; }
+}
+
+async function openDesign(id) {
+  setBusy(true, "Loading design…");
+  try {
+    const res = await fetch("/api/designs/" + id);
+    const data = await res.json();
+    if (data.spec) {
+      spec = data.spec; currentId = id;
+      render(spec);
+      chat.innerHTML = "";
+      addMsg("bot", escapeHtml(spec.summary || spec.name || "Loaded design.") +
+        `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m</div>`);
+      $("#designs-drawer").hidden = true;
+      $("#mode-hint").textContent = "Ask for changes to refine it.";
+    }
+  } catch { addMsg("err", "Couldn't load that design."); }
+  finally { setBusy(false); }
+}
+
+$("#btn-designs").addEventListener("click", () => {
+  const d = $("#designs-drawer");
+  d.hidden = !d.hidden;
+  if (!d.hidden) loadDesignsList();
+});
+$("#dd-close").addEventListener("click", () => { $("#designs-drawer").hidden = true; });
+$("#dd-list").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    e.stopPropagation();
+    await fetch("/api/designs/" + del.dataset.del, { method: "DELETE" });
+    if (currentId === del.dataset.del) currentId = null;
+    loadDesignsList();
+    return;
+  }
+  const item = e.target.closest(".dd-item");
+  if (item) openDesign(item.dataset.id);
+});
+$("#btn-new").addEventListener("click", () => {
+  spec = null; currentId = null;
+  chat.innerHTML = "";
+  $("#empty").classList.remove("hidden");
+  $("#designs-drawer").hidden = true;
+  $("#mode-hint").textContent = "";
+  promptEl.value = "";
+  promptEl.focus();
+});
 
 function printSheets() {
   if (!spec) return;
