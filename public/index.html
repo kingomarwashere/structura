@@ -28,6 +28,7 @@
           <div class="tag">AI structural designer · <span>A Radical Party Project</span></div>
         </div>
         <div class="brand-btns">
+          <button id="btn-key" title="Your Anthropic API key">🔑 Key</button>
           <button id="btn-new" title="Start a new design">+ New</button>
           <button id="btn-designs" title="Your saved designs">Saved</button>
         </div>
@@ -37,6 +38,20 @@
     <div id="designs-drawer" hidden>
       <div class="dd-head">Saved designs <button id="dd-close">✕</button></div>
       <div id="dd-list"></div>
+    </div>
+
+    <div id="key-panel" hidden>
+      <div class="dd-head">Your AI key <button id="key-close">✕</button></div>
+      <div class="kp-body">
+        <p>Structura runs on <b>your own Anthropic API key</b>, so designs are generated on your account. Your key is stored only in this browser and sent over HTTPS solely to run your designs.</p>
+        <input id="key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+        <div class="kp-row">
+          <button id="key-save">Save key</button>
+          <button id="key-clear" class="ghost">Clear</button>
+        </div>
+        <div id="key-status"></div>
+        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key → console.anthropic.com</a>
+      </div>
     </div>
 
     <div id="chat"></div>

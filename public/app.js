@@ -22,6 +22,32 @@ function setBusy(b, msg) {
   if (msg) $("#loading-msg").textContent = msg;
 }
 
+// ---- BYOK: the user's own Anthropic key, stored only in this browser ----
+const KEY_LS = "structura_key";
+const getKey = () => { try { return localStorage.getItem(KEY_LS) || ""; } catch { return ""; } };
+function setKey(v) { try { v ? localStorage.setItem(KEY_LS, v) : localStorage.removeItem(KEY_LS); } catch {} updateKeyUI(); }
+function updateKeyUI() {
+  const has = !!getKey();
+  const btn = $("#btn-key");
+  btn.textContent = has ? "🔑 Key ✓" : "🔑 Key";
+  btn.classList.toggle("set", has);
+  $("#key-status").textContent = has ? "A key is saved in this browser." : "No key saved yet.";
+}
+function openKeyPanel(msg) {
+  $("#key-input").value = getKey();
+  $("#key-panel").hidden = false;
+  $("#designs-drawer").hidden = true;
+  updateKeyUI();
+  if (msg) $("#key-status").textContent = msg;
+  showScreen("design");
+  $("#key-input").focus();
+}
+$("#btn-key").addEventListener("click", () => { const p = $("#key-panel"); if (p.hidden) openKeyPanel(); else p.hidden = true; });
+$("#key-close").addEventListener("click", () => { $("#key-panel").hidden = true; });
+$("#key-save").addEventListener("click", () => { setKey($("#key-input").value.trim()); $("#key-status").textContent = "Saved — you're ready to design."; });
+$("#key-clear").addEventListener("click", () => { setKey(""); $("#key-input").value = ""; });
+updateKeyUI();
+
 async function design(prompt) {
   if (busy || !prompt.trim()) return;
   addMsg("user", escapeHtml(prompt));
@@ -30,13 +56,17 @@ async function design(prompt) {
   setBusy(true, spec ? "Revising the design…" : "Engineering your design…");
   showScreen("view");   // reveal the stage so the loading spinner is visible on mobile
   try {
+    const userKey = getKey();
     const res = await fetch("/api/design", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(userKey ? { "x-user-key": userKey } : {}) },
       body: JSON.stringify({ prompt, current: spec || undefined }),
     });
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.detail || data.error || ("HTTP " + res.status));
+    if (!res.ok || data.error) {
+      if (data.keyIssue) openKeyPanel(data.message);
+      throw new Error(data.message || data.detail || data.error || ("HTTP " + res.status));
+    }
     spec = data.spec;
     render(spec);
     addMsg("bot", escapeHtml(spec.summary || "Design ready.") +
@@ -118,8 +148,10 @@ document.querySelectorAll("#mobile-nav button").forEach(b => b.addEventListener(
 showScreen("design");
 
 function intro() {
-  if (!chat.children.length)
-    addMsg("bot", "Describe any structure — a shed, house, warehouse, carport or piece of infrastructure — and I'll engineer it into a 3D model, blueprints and a parts list. Tap an example below, or type your own.");
+  if (chat.children.length) return;
+  addMsg("bot", "Describe any structure — a shed, house, warehouse, carport or piece of infrastructure — and I'll engineer it into a 3D model, blueprints and a parts list. Tap an example below, or type your own.");
+  if (!getKey())
+    addMsg("bot", "First, tap <b>🔑 Key</b> and add your own Anthropic API key — designs run on your account (free to create, a few cents each).");
 }
 intro();
 

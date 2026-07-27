@@ -199,7 +199,14 @@ async function handleDesign(request, env) {
   try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
   const prompt = (body.prompt || "").toString().trim();
   if (!prompt) return json({ error: "Missing prompt" }, 400);
-  if (!env.ANTHROPIC_API_KEY) return json({ error: "Server missing ANTHROPIC_API_KEY" }, 500);
+
+  // BYOK: prefer the user's own Anthropic key (never stored or logged), else the server key.
+  const userKey = (request.headers.get("x-user-key") || "").trim();
+  const apiKey = userKey || env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return json({ error: "no_key", keyIssue: true,
+      message: "Add your Anthropic API key to generate designs — it runs on your own account. Tap the 🔑 Key button." }, 400);
+  }
 
   const userContent = body.current
     ? `Here is the existing design as JSON:\n\n${JSON.stringify(body.current)}\n\nApply this change and return the full updated design:\n${prompt}`
@@ -224,18 +231,30 @@ async function handleDesign(request, env) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": env.ANTHROPIC_API_KEY,
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(payload),
     });
   } catch (e) {
-    return json({ error: "Upstream request failed: " + e.message }, 502);
+    return json({ error: "upstream", message: "Couldn't reach the AI service. Please try again." }, 502);
   }
 
   if (!resp.ok) {
     const txt = await resp.text();
-    return json({ error: "Anthropic API error", status: resp.status, detail: txt.slice(0, 800) }, 502);
+    let code = "api_error", message = "The AI service returned an error. Please try again in a moment.", keyIssue = false;
+    if (resp.status === 401 || /authentication|invalid x-api-key/i.test(txt)) {
+      code = "bad_key"; keyIssue = true;
+      message = "That Anthropic API key was rejected. Check it in the 🔑 Key panel.";
+    } else if (/credit balance/i.test(txt)) {
+      code = "no_credit"; keyIssue = true;
+      message = userKey
+        ? "Your Anthropic account is out of credit — top up at console.anthropic.com, then try again."
+        : "Add your own Anthropic API key (🔑 Key) to generate designs — it runs on your account.";
+    } else if (resp.status === 429) {
+      code = "rate_limit"; message = "Anthropic rate-limited the request — wait a few seconds and try again.";
+    }
+    return json({ error: code, code, message, keyIssue }, 400);
   }
 
   const data = await resp.json();
