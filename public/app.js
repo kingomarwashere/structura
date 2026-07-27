@@ -28,6 +28,7 @@ async function design(prompt) {
   promptEl.value = "";
   $("#mode-hint").textContent = "";
   setBusy(true, spec ? "Revising the design…" : "Engineering your design…");
+  showScreen("view");   // reveal the stage so the loading spinner is visible on mobile
   try {
     const res = await fetch("/api/design", {
       method: "POST",
@@ -41,8 +42,10 @@ async function design(prompt) {
     addMsg("bot", escapeHtml(spec.summary || "Design ready.") +
       `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m · ${escapeHtml(spec.structure?.system || "")}</div>`);
     saveDesign(prompt);
+    showScreen("view");
   } catch (e) {
     addMsg("err", "Couldn't generate that design: " + escapeHtml(e.message));
+    showScreen("design");   // surface the error message (in chat) on mobile
   } finally {
     setBusy(false);
     $("#mode-hint").textContent = spec ? "Ask for changes to refine it." : "";
@@ -105,6 +108,26 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   if (t.dataset.view === "model" && scene) requestAnimationFrame(() => scene._resize());
 }));
 
+// ---- mobile screen switching (Design ⇄ View) ----
+function showScreen(name) {
+  document.body.dataset.screen = name;
+  document.querySelectorAll("#mobile-nav button").forEach(b => b.classList.toggle("active", b.dataset.screen === name));
+  if (name === "view" && scene) requestAnimationFrame(() => { scene._resize(); requestAnimationFrame(() => scene._resize()); });
+}
+document.querySelectorAll("#mobile-nav button").forEach(b => b.addEventListener("click", () => showScreen(b.dataset.screen)));
+showScreen("design");
+
+function intro() {
+  if (!chat.children.length)
+    addMsg("bot", "Describe any structure — a shed, house, warehouse, carport or piece of infrastructure — and I'll engineer it into a 3D model, blueprints and a parts list. Tap an example below, or type your own.");
+}
+intro();
+
+// ---- export menu (mobile) ----
+$("#tools-toggle").addEventListener("click", (e) => { e.stopPropagation(); $("#toolbar").classList.toggle("open"); });
+$("#toolbar").addEventListener("click", (e) => { if (e.target.closest("button")) $("#toolbar").classList.remove("open"); });
+document.addEventListener("click", (e) => { if (!$("#toolbar").contains(e.target) && e.target !== $("#tools-toggle")) $("#toolbar").classList.remove("open"); });
+
 // ---- composer ----
 $("#composer").addEventListener("submit", (e) => { e.preventDefault(); design(promptEl.value); });
 promptEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); design(promptEl.value); } });
@@ -161,6 +184,7 @@ async function openDesign(id) {
         `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m</div>`);
       $("#designs-drawer").hidden = true;
       $("#mode-hint").textContent = "Ask for changes to refine it.";
+      showScreen("view");
     }
   } catch { addMsg("err", "Couldn't load that design."); }
   finally { setBusy(false); }
@@ -187,10 +211,12 @@ $("#dd-list").addEventListener("click", async (e) => {
 $("#btn-new").addEventListener("click", () => {
   spec = null; currentId = null;
   chat.innerHTML = "";
+  intro();
   $("#empty").classList.remove("hidden");
   $("#designs-drawer").hidden = true;
   $("#mode-hint").textContent = "";
   promptEl.value = "";
+  showScreen("design");
   promptEl.focus();
 });
 

@@ -60,11 +60,14 @@
 
   <main id="stage">
     <nav id="tabs">
-      <button class="tab active" data-view="model">3D Model</button>
-      <button class="tab" data-view="plan">Floor Plan</button>
-      <button class="tab" data-view="elevations">Elevations</button>
-      <button class="tab" data-view="bom">Parts List</button>
+      <div id="tablist">
+        <button class="tab active" data-view="model">3D Model</button>
+        <button class="tab" data-view="plan">Floor Plan</button>
+        <button class="tab" data-view="elevations">Elevations</button>
+        <button class="tab" data-view="bom">Parts List</button>
+      </div>
       <div class="spacer"></div>
+      <button id="tools-toggle" class="tool" title="Export & options">Export ▾</button>
       <div id="toolbar">
         <label class="chk"><input type="checkbox" id="toggle-frame" /> Frame</label>
         <button id="btn-stl" class="tool" title="Download 3D model (STL)">STL</button>
@@ -92,6 +95,11 @@
 
     <div id="loading" hidden><div class="spinner"></div><div id="loading-msg">Engineering your design…</div></div>
   </main>
+
+  <nav id="mobile-nav">
+    <button data-screen="design" class="active">✏️ Design</button>
+    <button data-screen="view">🏗 View</button>
+  </nav>
 </div>
 <script type="module" src="/app.js"></script>
 </body>

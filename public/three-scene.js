@@ -118,7 +118,7 @@ export class Scene3D {
 
   _resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
-    this.renderer.setSize(w, h, false);
+    this.renderer.setSize(w, h);   // updateStyle=true: canvas CSS box = w×h, buffer = ×pixelRatio (retina-correct)
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
