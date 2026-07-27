@@ -1,0 +1,10 @@
+{
+  "name": "structura",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI building & infrastructure designer — chat to 3D + blueprints + engineering BOM",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}

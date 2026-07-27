@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Structura — AI Building & Infrastructure Designer</title>
+<meta name="description" content="Describe a building, shed or structure in plain language. Structura designs it, shows it in 3D, and generates real blueprints and an engineering bill of materials." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <header id="brand">
+      <div class="logo">STRUCTURA</div>
+      <div class="tag">AI structural designer · <span>A Radical Party Project</span></div>
+    </header>
+
+    <div id="chat"></div>
+
+    <div id="examples">
+      <div class="ex-label">Try:</div>
+      <button class="ex" data-p="A 12m x 7m steel farm shed, 3.6m eave, gable roof, one 3.5m roller door on the front and a personnel door + two windows on the side.">Farm shed</button>
+      <button class="ex" data-p="A double carport, 6x6m, skillion roof, open sides, timber posts.">Carport</button>
+      <button class="ex" data-p="A two-storey 9x8m modern house, hip roof, garage, front door and windows on every wall.">2-storey house</button>
+      <button class="ex" data-p="A 30x15m warehouse with 5m eave, steel portal frame, two large roller doors and a row of high windows.">Warehouse</button>
+    </div>
+
+    <form id="composer">
+      <textarea id="prompt" rows="3" placeholder="Describe a building, shed, or structure to design…"></textarea>
+      <div class="composer-row">
+        <button type="submit" id="send">Design it</button>
+        <span id="mode-hint"></span>
+      </div>
+    </form>
+  </aside>
+
+  <main id="stage">
+    <nav id="tabs">
+      <button class="tab active" data-view="model">3D Model</button>
+      <button class="tab" data-view="plan">Floor Plan</button>
+      <button class="tab" data-view="elevations">Elevations</button>
+      <button class="tab" data-view="bom">Parts List</button>
+      <div class="spacer"></div>
+      <div id="toolbar">
+        <label class="chk"><input type="checkbox" id="toggle-frame" /> Frame</label>
+        <button id="btn-stl" class="tool" title="Download 3D model (STL)">STL</button>
+        <button id="btn-print" class="tool" title="Print blueprint sheet">Print</button>
+        <button id="btn-csv" class="tool" title="Download parts list (CSV)">CSV</button>
+        <button id="btn-json" class="tool" title="Download design spec (JSON)">JSON</button>
+      </div>
+    </nav>
+
+    <section id="view-model" class="view active">
+      <div id="viewport"></div>
+      <div id="specbar"></div>
+    </section>
+    <section id="view-plan" class="view"><div class="sheet-wrap" id="plan-wrap"></div></section>
+    <section id="view-elevations" class="view"><div class="sheet-wrap" id="elev-wrap"></div></section>
+    <section id="view-bom" class="view"><div id="bom-wrap"></div></section>
+
+    <div id="empty">
+      <div class="empty-inner">
+        <div class="big">Design anything you can build.</div>
+        <p>Describe a shed, house, warehouse, carport or piece of infrastructure. Structura engineers it, renders it in 3D, and generates blueprints plus a full parts list.</p>
+      </div>
+    </div>
+
+    <div id="loading" hidden><div class="spinner"></div><div id="loading-msg">Engineering your design…</div></div>
+  </main>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
