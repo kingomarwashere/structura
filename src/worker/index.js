@@ -205,10 +205,29 @@ function parseSpec(text) {
 
 const maxUrl = (env) => env.MAX_SERVICE_URL.replace(/\/$/, "");
 
+// Compact schema for the Max path — the full JSON Schema quadruples Claude Code's
+// generation time (~113s vs ~30s), so describe the shape tersely instead.
+const COMPACT_SCHEMA = `Output ONLY one JSON object (no markdown, no prose, no code fences) with exactly these keys:
+name(str), summary(str 1-2 sentences), buildingType(str), units:"m",
+footprint:{width(num), length(num), wings:[] (or [{x,z,width,length}] for L/T/U/cross shapes)},
+storeys(int), wallHeight(num),
+roof:{type:"gable"|"skillion"|"flat"|"hip", pitchDeg(num), overhang(num), ridgeAxis:"width"|"length"},
+walls:{thickness(num), material(str), colorHex(str), openWalls:[] (or subset of "front"|"back"|"left"|"right" for open-sided carports/pavilions)},
+openings:[{wall:"front"|"back"|"left"|"right", type:"door"|"window"|"rollerDoor"|"garage"|"opening", width(num), height(num), sillHeight(num), offset(num, -1=auto), count(int), storey(int)}],
+structure:{system(str), baySpacing(num), columnSize(str), rafterSize(str), foundation:"slab"|"piers"|"strip"},
+billOfMaterials:[{category(str), item(str), spec(str), qty(num), unit(str), material(str), notes(str)}] (8-12 key items only),
+engineeringNotes:[str] (<=4), compliance:[str] (<=4).
+front=-Z, back=+Z, left=-X, right=+X. Every key required. Be concise and fast — do NOT pad.`;
+
 // Owner-only fallback: generate via the owner's Claude Max (Claude Code headless)
 // behind their tunnel. Async: start a job, return its id; the client polls status.
 async function generateViaMax(env, userContent) {
-  const system = `${SYSTEM_PROMPT}\n\nBE CONCISE AND FAST: billOfMaterials = 8–12 key line items only; engineeringNotes ≤ 4 short points; compliance ≤ 4 items; keep every string terse. Do NOT pad.\n\nReturn ONLY a single JSON object — no markdown, no code fences, no commentary — matching this JSON Schema, with every required field present:\n${JSON.stringify(BUILDING_SCHEMA)}`;
+  // Strip tool references — Claude Code has no emit_building tool, and the model
+  // attempting tool-use is what balloons latency (~30s → ~100s).
+  const maxSystem = SYSTEM_PROMPT
+    .replace("by calling the emit_building tool", "as a single JSON object")
+    .replace("via the tool", "as JSON");
+  const system = `${maxSystem}\n\n${COMPACT_SCHEMA}`;
   let resp;
   try {
     resp = await fetch(maxUrl(env) + "/start", {

@@ -23,7 +23,7 @@ function runClaude(prompt, system) {
       cwd: "/tmp", env: process.env,
     });
     let out = "", err = "";
-    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("claude timed out")); }, 150000);
+    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("claude timed out")); }, 210000);
     child.stdout.on("data", d => (out += d));
     child.stderr.on("data", d => (err += d));
     child.on("close", (code) => {
