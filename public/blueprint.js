@@ -24,7 +24,7 @@ function sheet({ title, spec, bodyW, bodyH, scaleLabel }, drawFn) {
     <rect x="${PAD}" y="${tbY}" width="${areaW}" height="${TB}" fill="none" stroke="${INK}" stroke-width="1.4"/>
     <line x1="${PAD + 470}" y1="${tbY}" x2="${PAD + 470}" y2="${tbY + TB}" stroke="${INK}" stroke-width="1"/>
     <line x1="${PAD + 800}" y1="${tbY}" x2="${PAD + 800}" y2="${tbY + TB}" stroke="${INK}" stroke-width="1"/>
-    <text x="${PAD + 16}" y="${tbY + 34}" fill="${RED}" font-size="26" font-weight="700" font-family="Syne, sans-serif">STRUCTURA</text>
+    <text x="${PAD + 16}" y="${tbY + 34}" fill="${RED}" font-size="26" font-weight="700" font-family="Syne, sans-serif">REDGUM</text>
     <text x="${PAD + 16}" y="${tbY + 60}" fill="${INK}" font-size="15" font-weight="700">${esc(spec.name || "Untitled structure")}</text>
     <text x="${PAD + 16}" y="${tbY + 80}" fill="${INK2}" font-size="11">${esc(spec.buildingType || "")} · ${esc(spec.structure?.system || "")}</text>
     <text x="${PAD + 486}" y="${tbY + 26}" fill="${INK2}" font-size="10">DRAWING</text>

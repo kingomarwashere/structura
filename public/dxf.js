@@ -100,7 +100,7 @@ export function toDXF(spec) {
   e += text("DIMENSIONS", dx - 0.4, L / 2, 0.35, L.toFixed(2) + " m");
 
   // title
-  e += text("TEXT", 0, L + 0.7, 0.5, (spec.name || "Structura") + " — FLOOR PLAN");
+  e += text("TEXT", 0, L + 0.7, 0.5, (spec.name || "Redgum") + " — FLOOR PLAN");
   e += text("TEXT", 0, L + 0.2, 0.28, (spec.buildingType || "") + "  |  " + (spec.structure?.system || "") + "  |  metres");
 
   const entities = g(0, "SECTION") + g(2, "ENTITIES") + e + g(0, "ENDSEC");

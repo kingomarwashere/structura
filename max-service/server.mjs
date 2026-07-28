@@ -41,6 +41,11 @@ function runClaude(prompt, system) {
 const jobs = new Map(); // id -> { status, text?, error?, t }
 setInterval(() => { const now = Date.now(); for (const [k, v] of jobs) if (now - v.t > 10 * 60 * 1000) jobs.delete(k); }, 60000);
 
+// Cap concurrent claude processes — the backup is public but runs on ONE Max plan,
+// so protect the Mac and the account's rate limits.
+const MAX_ACTIVE = Number(process.env.MAX_CONCURRENCY || 2);
+let active = 0;
+
 const readBody = (req) => new Promise((resolve) => { let b = ""; req.on("data", c => (b += c)); req.on("end", () => resolve(b)); });
 
 http.createServer(async (req, res) => {
@@ -56,13 +61,16 @@ http.createServer(async (req, res) => {
     let prompt, system;
     try { const p = JSON.parse(await readBody(req)); prompt = p.prompt; system = p.system; } catch { return send(400, { error: "bad json" }); }
     if (!prompt || typeof prompt !== "string") return send(400, { error: "missing prompt" });
+    if (active >= MAX_ACTIVE) return send(429, { error: "busy", active });
     const id = crypto.randomUUID();
     jobs.set(id, { status: "pending", t: Date.now() });
     const t0 = Date.now();
-    console.log(`[job ${id.slice(0, 8)}] start prompt=${prompt.length}b system=${(system || "").length}b`);
+    active++;
+    console.log(`[job ${id.slice(0, 8)}] start (active=${active}) prompt=${prompt.length}b system=${(system || "").length}b`);
     runClaude(prompt, system)
       .then(text => { jobs.set(id, { status: "done", text, t: Date.now() }); console.log(`[job ${id.slice(0, 8)}] done in ${Date.now() - t0}ms out=${text.length}b`); })
-      .catch(e => { jobs.set(id, { status: "error", error: String(e.message || e).slice(0, 400), t: Date.now() }); console.log(`[job ${id.slice(0, 8)}] error: ${e.message}`); });
+      .catch(e => { jobs.set(id, { status: "error", error: String(e.message || e).slice(0, 400), t: Date.now() }); console.log(`[job ${id.slice(0, 8)}] error: ${e.message}`); })
+      .finally(() => { active--; });
     return send(200, { jobId: id });
   }
 

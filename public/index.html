@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Structura — AI Building & Infrastructure Designer</title>
-<meta name="description" content="Describe a building, shed or structure in plain language. Structura designs it, shows it in 3D, and generates real blueprints and an engineering bill of materials." />
+<title>Redgum — AI Building & Infrastructure Designer</title>
+<meta name="description" content="Describe a building, shed or structure in plain language. Redgum designs it, shows it in 3D, and generates real blueprints and an engineering bill of materials." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -24,7 +24,7 @@
     <header id="brand">
       <div class="brand-top">
         <div>
-          <div class="logo">STRUCTURA</div>
+          <div class="logo">REDGUM</div>
           <div class="tag">AI structural designer · <span>A Radical Party Project</span></div>
         </div>
         <div class="brand-btns">
@@ -43,7 +43,7 @@
     <div id="key-panel" hidden>
       <div class="dd-head">Your AI key <button id="key-close">✕</button></div>
       <div class="kp-body">
-        <p>Structura runs on <b>your own Anthropic API key</b>, so designs are generated on your account. Your key is stored only in this browser and sent over HTTPS solely to run your designs.</p>
+        <p>Redgum works with no setup — designs run on a <b>shared Claude Max backup</b> (about 2 min each, and can be busy at peak). Add <b>your own Anthropic API key</b> for <b>instant, unlimited</b> designs billed to your account. Your key is stored only in this browser and sent over HTTPS solely to run your designs.</p>
         <input id="key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
         <div class="kp-row">
           <button id="key-save">Save key</button>
@@ -51,16 +51,6 @@
         </div>
         <div id="key-status"></div>
         <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key → console.anthropic.com</a>
-        <details id="owner-box">
-          <summary>Owner: use my Claude Max instead</summary>
-          <p>Personal backup — routes generation to Claude Code on your Max plan, no API key needed. Requires your local service + tunnel running.</p>
-          <input id="owner-input" type="password" placeholder="owner secret" autocomplete="off" spellcheck="false" />
-          <div class="kp-row">
-            <button id="owner-save">Enable</button>
-            <button id="owner-clear" class="ghost">Turn off</button>
-          </div>
-          <div id="owner-status"></div>
-        </details>
       </div>
     </div>
 
@@ -114,7 +104,7 @@
     <div id="empty">
       <div class="empty-inner">
         <div class="big">Design anything you can build.</div>
-        <p>Describe a shed, house, warehouse, carport or piece of infrastructure. Structura engineers it, renders it in 3D, and generates blueprints plus a full parts list.</p>
+        <p>Describe a shed, house, warehouse, carport or piece of infrastructure. Redgum engineers it, renders it in 3D, and generates blueprints plus a full parts list.</p>
       </div>
     </div>
 

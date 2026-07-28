@@ -9,7 +9,7 @@ let scene = null, spec = null, busy = false, currentId = null;
 function addMsg(kind, html) {
   const el = document.createElement("div");
   el.className = "msg " + kind;
-  el.innerHTML = kind === "bot" ? `<div class="mname">Structura</div>${html}` : html;
+  el.innerHTML = kind === "bot" ? `<div class="mname">Redgum</div>${html}` : html;
   chat.appendChild(el);
   chat.scrollTop = chat.scrollHeight;
   return el;
@@ -23,7 +23,8 @@ function setBusy(b, msg) {
 }
 
 // ---- BYOK: the user's own Anthropic key, stored only in this browser ----
-const KEY_LS = "structura_key";
+const KEY_LS = "redgum_key";
+try { const old = localStorage.getItem("structura_key"); if (old && !localStorage.getItem(KEY_LS)) { localStorage.setItem(KEY_LS, old); localStorage.removeItem("structura_key"); } } catch {}
 const getKey = () => { try { return localStorage.getItem(KEY_LS) || ""; } catch { return ""; } };
 function setKey(v) { try { v ? localStorage.setItem(KEY_LS, v) : localStorage.removeItem(KEY_LS); } catch {} updateKeyUI(); }
 function updateKeyUI() {
@@ -46,35 +47,20 @@ $("#btn-key").addEventListener("click", () => { const p = $("#key-panel"); if (p
 $("#key-close").addEventListener("click", () => { $("#key-panel").hidden = true; });
 $("#key-save").addEventListener("click", () => { setKey($("#key-input").value.trim()); $("#key-status").textContent = "Saved — you're ready to design."; });
 $("#key-clear").addEventListener("click", () => { setKey(""); $("#key-input").value = ""; });
-
-// Owner-only: use the owner's Claude Max backup (no API key needed)
-const OWNER_LS = "structura_owner";
-const getOwner = () => { try { return localStorage.getItem(OWNER_LS) || ""; } catch { return ""; } };
-function setOwner(v) { try { v ? localStorage.setItem(OWNER_LS, v) : localStorage.removeItem(OWNER_LS); } catch {} updateOwnerUI(); }
-function updateOwnerUI() {
-  const on = !!getOwner();
-  $("#owner-status").textContent = on ? "✓ Claude Max backup enabled — no API key needed." : "Off — using your API key.";
-  $("#owner-input").value = getOwner();
-  if (on) $("#owner-box").open = true;
-}
-$("#owner-save").addEventListener("click", () => { setOwner($("#owner-input").value.trim()); });
-$("#owner-clear").addEventListener("click", () => { setOwner(""); $("#owner-input").value = ""; });
 updateKeyUI();
-updateOwnerUI();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// Poll the owner's Claude Max job until it produces a spec (or errors / times out).
+// Poll the shared Claude Max job until it produces a spec (or errors / times out).
 async function pollMax(jobId) {
-  const owner = getOwner();
   const deadline = Date.now() + 240000;
   let elapsed = 0;
   while (Date.now() < deadline) {
     await sleep(3000);
     elapsed += 3;
-    setBusy(true, `Designing on your Claude Max… (${elapsed}s)`);
+    setBusy(true, `Designing on the shared Claude Max… (${elapsed}s)`);
     let d;
     try {
-      const r = await fetch("/api/design/status?jobId=" + encodeURIComponent(jobId), { headers: owner ? { "x-owner-secret": owner } : {} });
+      const r = await fetch("/api/design/status?jobId=" + encodeURIComponent(jobId));
       d = await r.json();
     } catch { continue; }
     if (d.spec) return d.spec;
@@ -91,14 +77,10 @@ async function design(prompt) {
   setBusy(true, spec ? "Revising the design…" : "Engineering your design…");
   showScreen("view");   // reveal the stage so the loading spinner is visible on mobile
   try {
-    const userKey = getKey(), owner = getOwner();
+    const userKey = getKey();
     const res = await fetch("/api/design", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(userKey ? { "x-user-key": userKey } : {}),
-        ...(owner ? { "x-owner-secret": owner } : {}),
-      },
+      headers: { "content-type": "application/json", ...(userKey ? { "x-user-key": userKey } : {}) },
       body: JSON.stringify({ prompt, current: spec || undefined }),
     });
     const data = await res.json();
@@ -189,8 +171,8 @@ showScreen("design");
 function intro() {
   if (chat.children.length) return;
   addMsg("bot", "Describe any structure — a shed, house, warehouse, carport or piece of infrastructure — and I'll engineer it into a 3D model, blueprints and a parts list. Tap an example below, or type your own.");
-  if (!getKey() && !getOwner())
-    addMsg("bot", "First, tap <b>🔑 Key</b> and add your own Anthropic API key — designs run on your account (free to create, a few cents each).");
+  if (!getKey())
+    addMsg("bot", "No setup needed — designs run on a shared Claude Max backup (~2 min each, can be busy). For instant, unlimited designs, tap <b>🔑 Key</b> and add your own Anthropic key.");
 }
 intro();
 
@@ -294,7 +276,7 @@ $("#btn-new").addEventListener("click", () => {
 function printSheets() {
   if (!spec) return;
   const w = window.open("", "_blank");
-  w.document.write(`<html><head><title>${escapeHtml(spec.name || "Structura")} — Blueprints</title>
+  w.document.write(`<html><head><title>${escapeHtml(spec.name || "Redgum")} — Blueprints</title>
     <style>@page{margin:12mm} body{margin:0;background:#fff} svg{width:100%;height:auto;page-break-after:always;display:block}</style>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet"></head>
     <body>${floorPlanSVG(spec)}${elevationsSVG(spec)}</body></html>`);

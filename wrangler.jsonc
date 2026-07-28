@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "routes": [
+    { "pattern": "redgum.theradicalparty.com", "custom_domain": true },
     { "pattern": "structura.theradicalparty.com", "custom_domain": true }
   ],
   "assets": {

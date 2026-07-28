@@ -1,4 +1,4 @@
-// Structura — AI building/infrastructure designer on Cloudflare Workers.
+// Redgum — AI building/infrastructure designer on Cloudflare Workers.
 // POST /api/design { prompt, current? } -> normalized building spec (JSON).
 // Static assets served via the ASSETS binding.
 
@@ -121,7 +121,7 @@ const BUILDING_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `You are Structura, an expert building & infrastructure design engine. A user describes a structure in plain language (a shed, house, warehouse, carport, barn, cabin, pavilion, tank stand, small bridge, etc.) and you produce a single complete, buildable, structurally-sane design by calling the emit_building tool.
+const SYSTEM_PROMPT = `You are Redgum, an expert building & infrastructure design engine. A user describes a structure in plain language (a shed, house, warehouse, carport, barn, cabin, pavilion, tank stand, small bridge, etc.) and you produce a single complete, buildable, structurally-sane design by calling the emit_building tool.
 
 Rules:
 - Choose sensible real-world dimensions, materials, structural systems and a realistic bill of materials. Derive BOM quantities from the actual geometry you specify (perimeter, wall area, roof area, number of frames = length/baySpacing + 1, etc.).
@@ -219,17 +219,16 @@ async function generateViaMax(env, userContent) {
   } catch {
     return json({ error: "max_unreachable", message: "Your Claude Max backup isn't reachable — is the service running on your Mac?" }, 502);
   }
+  if (resp.status === 429) return json({ error: "max_busy", message: "The shared Claude Max backup is busy right now — try again shortly, or add your own Anthropic key (🔑) for instant designs." }, 503);
   if (!resp.ok) return json({ error: "max_error", message: "Claude Max backup error (start): " + (await resp.text()).slice(0, 160) }, 502);
   const { jobId } = await resp.json();
   if (!jobId) return json({ error: "max_error", message: "Claude Max backup didn't start a job." }, 502);
   return json({ pending: true, jobId });
 }
 
-// Poll a Max job (owner-gated).
+// Poll a Max job. Public — the random jobId is the capability.
 async function handleMaxStatus(request, env) {
-  const ownerSecret = (request.headers.get("x-owner-secret") || "").trim();
-  if (!(ownerSecret && env.OWNER_SECRET && ownerSecret === env.OWNER_SECRET && env.MAX_SERVICE_URL))
-    return json({ error: "unauthorized" }, 401);
+  if (!env.MAX_SERVICE_URL) return json({ error: "unavailable" }, 503);
   const jobId = new URL(request.url).searchParams.get("jobId");
   if (!jobId) return json({ error: "missing jobId" }, 400);
   let resp;
@@ -258,11 +257,10 @@ async function handleDesign(request, env) {
     ? `Here is the existing design as JSON:\n\n${JSON.stringify(body.current)}\n\nApply this change and return the full updated design:\n${prompt}`
     : prompt;
 
-  // Auth priority: user's own Anthropic key → owner's Claude Max backup → shared server key.
+  // Auth priority: user's own Anthropic key → shared Claude Max backup → server key.
+  // The Max backup is currently PUBLIC: any keyless request falls back to it.
   const userKey = (request.headers.get("x-user-key") || "").trim();
-  const ownerSecret = (request.headers.get("x-owner-secret") || "").trim();
-  const useMax = !userKey && ownerSecret && env.OWNER_SECRET && ownerSecret === env.OWNER_SECRET && env.MAX_SERVICE_URL;
-  if (useMax) return generateViaMax(env, userContent);
+  if (!userKey && env.MAX_SERVICE_URL) return generateViaMax(env, userContent);
 
   const apiKey = userKey || env.ANTHROPIC_API_KEY;
   if (!apiKey) {
