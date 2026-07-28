@@ -50,23 +50,55 @@ $("#key-clear").addEventListener("click", () => { setKey(""); $("#key-input").va
 updateKeyUI();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A ticking progress bar + countdown + rotating status, so a ~75s wait doesn't
+// feel like a hang. Returns a stop() to tear it down. Estimate in seconds.
+const PHASES = [
+  [0, "Sizing the structure…"],
+  [0.18, "Framing walls & roof…"],
+  [0.42, "Placing doors & windows…"],
+  [0.66, "Drafting blueprints…"],
+  [0.82, "Costing the bill of materials…"],
+  [1, "Almost there…"],
+];
+function startProgress(estimate) {
+  const bar = $("#loading-bar"), fill = $("#loading-fill"), sub = $("#loading-sub"), msg = $("#loading-msg");
+  bar.hidden = false; sub.hidden = false;
+  const t0 = Date.now();
+  const tick = () => {
+    const el = (Date.now() - t0) / 1000;
+    const frac = Math.min(el / estimate, 1);
+    fill.style.width = Math.min(96, frac * 96).toFixed(0) + "%";
+    let label = PHASES[0][1];
+    for (const [f, l] of PHASES) if (frac >= f) label = l;
+    msg.textContent = label;
+    const remain = Math.max(0, Math.ceil(estimate - el));
+    sub.textContent = el < estimate - 1 ? `about ${remain}s remaining · running on the shared Claude Max` : "wrapping up — any moment now…";
+  };
+  tick();
+  const id = setInterval(tick, 1000);
+  return () => { clearInterval(id); bar.hidden = true; sub.hidden = true; fill.style.width = "0%"; };
+}
+
 // Poll the shared Claude Max job until it produces a spec (or errors / times out).
 async function pollMax(jobId) {
-  const deadline = Date.now() + 240000;
-  let elapsed = 0;
-  while (Date.now() < deadline) {
-    await sleep(3000);
-    elapsed += 3;
-    setBusy(true, `Designing on the shared Claude Max… (${elapsed}s)`);
-    let d;
-    try {
-      const r = await fetch("/api/design/status?jobId=" + encodeURIComponent(jobId));
-      d = await r.json();
-    } catch { continue; }
-    if (d.spec) return d.spec;
-    if (d.error) { if (d.keyIssue) openKeyPanel(d.message); throw new Error(d.message || d.error); }
+  const stop = startProgress(75);
+  try {
+    const deadline = Date.now() + 240000;
+    while (Date.now() < deadline) {
+      await sleep(3000);
+      let d;
+      try {
+        const r = await fetch("/api/design/status?jobId=" + encodeURIComponent(jobId));
+        d = await r.json();
+      } catch { continue; }
+      if (d.spec) return d.spec;
+      if (d.error) { if (d.keyIssue) openKeyPanel(d.message); throw new Error(d.message || d.error); }
+    }
+    throw new Error("Timed out waiting for Claude Max.");
+  } finally {
+    stop();
   }
-  throw new Error("Timed out waiting for Claude Max.");
 }
 
 async function design(prompt) {
