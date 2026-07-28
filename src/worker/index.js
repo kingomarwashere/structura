@@ -268,6 +268,112 @@ async function handleMaxStatus(request, env) {
   return json({ spec });
 }
 
+// SYSTEM_PROMPT with the Anthropic-tool references removed, for providers with no tool.
+function toolFreeSystem() {
+  return SYSTEM_PROMPT
+    .replace("by calling the emit_building tool", "as a single JSON object")
+    .replace("via the tool", "as JSON");
+}
+
+// Map any BYOK key to its provider + a sensible default model + endpoint.
+function detectProvider(key, model) {
+  key = (key || "").trim();
+  if (key.startsWith("sk-ant-")) return { kind: "anthropic", label: "Anthropic", model: model || MODEL };
+  if (key.startsWith("AIza")) return { kind: "gemini", label: "Google Gemini", model: model || "gemini-2.0-flash" };
+  if (key.startsWith("sk-or-")) return { kind: "openai", label: "OpenRouter", base: "https://openrouter.ai/api/v1", model: model || "openai/gpt-4o-mini" };
+  if (key.startsWith("gsk_")) return { kind: "openai", label: "Groq", base: "https://api.groq.com/openai/v1", model: model || "llama-3.3-70b-versatile" };
+  if (key.startsWith("sk-")) return { kind: "openai", label: "OpenAI", base: "https://api.openai.com/v1", model: model || "gpt-4o" };
+  return null;
+}
+
+async function providerError(resp) {
+  const txt = (await resp.text()).slice(0, 400);
+  if (resp.status === 401 || resp.status === 403 || /invalid.*api.?key|api.?key.*(not valid|invalid|expired)|api_key_invalid|unauthor|permission/i.test(txt))
+    return json({ error: "bad_key", keyIssue: true, message: "That API key was rejected. Check it in the 🔑 Key panel." }, 400);
+  if (resp.status === 429 || /quota|insufficient|exceeded|billing|credit|payment/i.test(txt))
+    return json({ error: "no_credit", keyIssue: true, message: "That account is rate-limited or out of credit — check your provider billing, or try another key." }, 400);
+  if (resp.status === 404 || /model/i.test(txt) && /not.*(found|exist|access)/i.test(txt))
+    return json({ error: "bad_model", keyIssue: true, message: "That model isn't available on your key. Set a model you have access to in the 🔑 Key panel." }, 400);
+  return json({ error: "api_error", message: "The AI provider returned an error. Please try again." }, 400);
+}
+
+// Anthropic — native Messages API with forced tool use (most reliable structured output).
+async function genAnthropic(apiKey, model, userContent) {
+  const payload = {
+    model, max_tokens: 4096,
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+    tools: [{ name: "emit_building", description: "Emit the complete structured building design.", input_schema: BUILDING_SCHEMA }],
+    tool_choice: { type: "tool", name: "emit_building" },
+    messages: [{ role: "user", content: userContent }],
+  };
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify(payload),
+    });
+  } catch { return json({ error: "upstream", message: "Couldn't reach Anthropic. Please try again." }, 502); }
+  if (!resp.ok) return providerError(resp);
+  const data = await resp.json();
+  const toolUse = (data.content || []).find((c) => c.type === "tool_use" && c.name === "emit_building");
+  if (!toolUse) { const spec = parseSpec((data.content || []).map(c => c.text).join("")); return spec ? json({ spec }) : json({ error: "parse", message: "The model didn't return a valid design — try again." }, 502); }
+  return json({ spec: toolUse.input });
+}
+
+// OpenAI & any OpenAI-compatible endpoint (OpenRouter, Groq, DeepSeek, Together, local, …).
+async function genOpenAI(apiKey, p, userContent) {
+  const body = {
+    model: p.model,
+    temperature: 0.4,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: `${toolFreeSystem()}\n\n${COMPACT_SCHEMA}` },
+      { role: "user", content: userContent + "\n\nReturn ONLY the JSON object." },
+    ],
+  };
+  let resp;
+  try {
+    resp = await fetch(p.base + "/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "authorization": "Bearer " + apiKey, "HTTP-Referer": "https://redgum.theradicalparty.com", "X-Title": "Redgum" },
+      body: JSON.stringify(body),
+    });
+  } catch { return json({ error: "upstream", message: `Couldn't reach ${p.label}. Please try again.` }, 502); }
+  if (!resp.ok) return providerError(resp);
+  const data = await resp.json();
+  const spec = parseSpec(data.choices?.[0]?.message?.content);
+  return spec ? json({ spec }) : json({ error: "parse", message: `${p.label} didn't return a valid design — try again.` }, 502);
+}
+
+// Google Gemini — generateContent with JSON response mode.
+async function genGemini(apiKey, model, userContent) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const body = {
+    systemInstruction: { parts: [{ text: `${toolFreeSystem()}\n\n${COMPACT_SCHEMA}` }] },
+    contents: [{ role: "user", parts: [{ text: userContent + "\n\nReturn ONLY the JSON object." }] }],
+    generationConfig: { responseMimeType: "application/json", temperature: 0.4 },
+  };
+  let resp;
+  try {
+    resp = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch { return json({ error: "upstream", message: "Couldn't reach Google Gemini. Please try again." }, 502); }
+  if (!resp.ok) return providerError(resp);
+  const data = await resp.json();
+  const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text).join("");
+  const spec = parseSpec(text);
+  return spec ? json({ spec }) : json({ error: "parse", message: "Gemini didn't return a valid design — try again." }, 502);
+}
+
+async function generateWithKey(userKey, model, userContent) {
+  const p = detectProvider(userKey, model);
+  if (!p) return json({ error: "bad_key", keyIssue: true, message: "Unrecognised API key. Use an Anthropic (sk-ant-…), OpenAI (sk-…), Google (AIza…), OpenRouter (sk-or-…) or Groq (gsk_…) key." }, 400);
+  if (p.kind === "anthropic") return genAnthropic(userKey, p.model, userContent);
+  if (p.kind === "openai") return genOpenAI(userKey, p, userContent);
+  if (p.kind === "gemini") return genGemini(userKey, p.model, userContent);
+  return json({ error: "bad_key", keyIssue: true, message: "Unsupported provider." }, 400);
+}
+
 async function handleDesign(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
@@ -278,67 +384,13 @@ async function handleDesign(request, env) {
     ? `Here is the existing design as JSON:\n\n${JSON.stringify(body.current)}\n\nApply this change and return the full updated design:\n${prompt}`
     : prompt;
 
-  // Auth priority: user's own Anthropic key → shared Claude Max backup → server key.
-  // The Max backup is currently PUBLIC: any keyless request falls back to it.
+  // Auth priority: user's own key (any provider) → shared Claude Max backup → server key.
   const userKey = (request.headers.get("x-user-key") || "").trim();
-  if (!userKey && env.MAX_SERVICE_URL) return generateViaMax(env, userContent);
-
-  const apiKey = userKey || env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return json({ error: "no_key", keyIssue: true,
-      message: "Add your Anthropic API key to generate designs — it runs on your own account. Tap the 🔑 Key button." }, 400);
-  }
-
-  const payload = {
-    model: MODEL,
-    max_tokens: 4096,
-    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    tools: [{
-      name: "emit_building",
-      description: "Emit the complete structured building design.",
-      input_schema: BUILDING_SCHEMA,
-    }],
-    tool_choice: { type: "tool", name: "emit_building" },
-    messages: [{ role: "user", content: userContent }],
-  };
-
-  let resp;
-  try {
-    resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    return json({ error: "upstream", message: "Couldn't reach the AI service. Please try again." }, 502);
-  }
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    let code = "api_error", message = "The AI service returned an error. Please try again in a moment.", keyIssue = false;
-    if (resp.status === 401 || /authentication|invalid x-api-key/i.test(txt)) {
-      code = "bad_key"; keyIssue = true;
-      message = "That Anthropic API key was rejected. Check it in the 🔑 Key panel.";
-    } else if (/credit balance/i.test(txt)) {
-      code = "no_credit"; keyIssue = true;
-      message = userKey
-        ? "Your Anthropic account is out of credit — top up at console.anthropic.com, then try again."
-        : "Add your own Anthropic API key (🔑 Key) to generate designs — it runs on your account.";
-    } else if (resp.status === 429) {
-      code = "rate_limit"; message = "Anthropic rate-limited the request — wait a few seconds and try again.";
-    }
-    return json({ error: code, code, message, keyIssue }, 400);
-  }
-
-  const data = await resp.json();
-  const toolUse = (data.content || []).find((c) => c.type === "tool_use" && c.name === "emit_building");
-  if (!toolUse) return json({ error: "Model did not return a design", raw: data }, 502);
-
-  return json({ spec: toolUse.input });
+  const userModel = (request.headers.get("x-model") || "").trim();
+  if (userKey) return generateWithKey(userKey, userModel, userContent);
+  if (env.MAX_SERVICE_URL) return generateViaMax(env, userContent);
+  if (env.ANTHROPIC_API_KEY) return genAnthropic(env.ANTHROPIC_API_KEY, MODEL, userContent);
+  return json({ error: "no_key", keyIssue: true, message: "Add your own API key (🔑) to generate designs." }, 400);
 }
 
 export default {

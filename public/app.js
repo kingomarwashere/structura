@@ -22,20 +22,39 @@ function setBusy(b, msg) {
   if (msg) $("#loading-msg").textContent = msg;
 }
 
-// ---- BYOK: the user's own Anthropic key, stored only in this browser ----
-const KEY_LS = "redgum_key";
+// ---- BYOK: the user's own key (any provider), stored only in this browser ----
+const KEY_LS = "redgum_key", MODEL_LS = "redgum_model";
 try { const old = localStorage.getItem("structura_key"); if (old && !localStorage.getItem(KEY_LS)) { localStorage.setItem(KEY_LS, old); localStorage.removeItem("structura_key"); } } catch {}
 const getKey = () => { try { return localStorage.getItem(KEY_LS) || ""; } catch { return ""; } };
-function setKey(v) { try { v ? localStorage.setItem(KEY_LS, v) : localStorage.removeItem(KEY_LS); } catch {} updateKeyUI(); }
+const getModel = () => { try { return localStorage.getItem(MODEL_LS) || ""; } catch { return ""; } };
+function providerName(key) {
+  key = (key || "").trim();
+  if (key.startsWith("sk-ant-")) return "Anthropic (Claude)";
+  if (key.startsWith("AIza")) return "Google Gemini";
+  if (key.startsWith("sk-or-")) return "OpenRouter";
+  if (key.startsWith("gsk_")) return "Groq";
+  if (key.startsWith("sk-")) return "OpenAI";
+  return key ? "Unrecognised key format" : "";
+}
+function setKey(v, model) {
+  try {
+    v ? localStorage.setItem(KEY_LS, v) : localStorage.removeItem(KEY_LS);
+    model ? localStorage.setItem(MODEL_LS, model) : localStorage.removeItem(MODEL_LS);
+  } catch {}
+  updateKeyUI();
+}
 function updateKeyUI() {
   const has = !!getKey();
   const btn = $("#btn-key");
   btn.textContent = has ? "🔑 Key ✓" : "🔑 Key";
   btn.classList.toggle("set", has);
-  $("#key-status").textContent = has ? "A key is saved in this browser." : "No key saved yet.";
+  $("#key-status").textContent = has
+    ? `Saved: ${providerName(getKey())}${getModel() ? " · " + getModel() : ""}`
+    : "No key saved — using the shared Claude Max backup.";
 }
 function openKeyPanel(msg) {
   $("#key-input").value = getKey();
+  $("#model-input").value = getModel();
   $("#key-panel").hidden = false;
   $("#designs-drawer").hidden = true;
   updateKeyUI();
@@ -45,8 +64,16 @@ function openKeyPanel(msg) {
 }
 $("#btn-key").addEventListener("click", () => { const p = $("#key-panel"); if (p.hidden) openKeyPanel(); else p.hidden = true; });
 $("#key-close").addEventListener("click", () => { $("#key-panel").hidden = true; });
-$("#key-save").addEventListener("click", () => { setKey($("#key-input").value.trim()); $("#key-status").textContent = "Saved — you're ready to design."; });
-$("#key-clear").addEventListener("click", () => { setKey(""); $("#key-input").value = ""; });
+$("#key-input").addEventListener("input", () => {
+  const v = $("#key-input").value.trim();
+  $("#key-status").textContent = v ? "Detected: " + providerName(v) : "No key saved — using the shared Claude Max backup.";
+});
+$("#key-save").addEventListener("click", () => {
+  setKey($("#key-input").value.trim(), $("#model-input").value.trim());
+  const k = getKey();
+  $("#key-status").textContent = k ? `Saved: ${providerName(k)}${getModel() ? " · " + getModel() : ""} — ready.` : "Cleared.";
+});
+$("#key-clear").addEventListener("click", () => { setKey("", ""); $("#key-input").value = ""; $("#model-input").value = ""; });
 updateKeyUI();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -109,10 +136,14 @@ async function design(prompt) {
   setBusy(true, spec ? "Revising the design…" : "Engineering your design…");
   showScreen("view");   // reveal the stage so the loading spinner is visible on mobile
   try {
-    const userKey = getKey();
+    const userKey = getKey(), userModel = getModel();
     const res = await fetch("/api/design", {
       method: "POST",
-      headers: { "content-type": "application/json", ...(userKey ? { "x-user-key": userKey } : {}) },
+      headers: {
+        "content-type": "application/json",
+        ...(userKey ? { "x-user-key": userKey } : {}),
+        ...(userModel ? { "x-model": userModel } : {}),
+      },
       body: JSON.stringify({ prompt, current: spec || undefined }),
     });
     const data = await res.json();
@@ -204,7 +235,7 @@ function intro() {
   if (chat.children.length) return;
   addMsg("bot", "Describe any structure — a shed, house, warehouse, carport or piece of infrastructure — and I'll engineer it into a 3D model, blueprints and a parts list. Tap an example below, or type your own.");
   if (!getKey())
-    addMsg("bot", "No setup needed — designs run on a shared Claude Max backup (~2 min each, can be busy). For instant, unlimited designs, tap <b>🔑 Key</b> and add your own Anthropic key.");
+    addMsg("bot", "No setup needed — designs run on a shared Claude Max backup (~2 min each, can be busy). For instant, unlimited designs, tap <b>🔑 Key</b> and add your own Anthropic, OpenAI, Gemini or OpenRouter key.");
 }
 intro();
 

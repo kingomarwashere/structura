@@ -43,14 +43,20 @@
     <div id="key-panel" hidden>
       <div class="dd-head">Your AI key <button id="key-close">✕</button></div>
       <div class="kp-body">
-        <p>Redgum works with no setup — designs run on a <b>shared Claude Max backup</b> (about 2 min each, and can be busy at peak). Add <b>your own Anthropic API key</b> for <b>instant, unlimited</b> designs billed to your account. Your key is stored only in this browser and sent over HTTPS solely to run your designs.</p>
-        <input id="key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+        <p>No setup needed — designs run on a <b>shared Claude Max backup</b> (~2 min each, can be busy). For <b>instant, unlimited</b> designs, add your own key from <b>Anthropic, OpenAI, Google Gemini, OpenRouter or Groq</b> — it's billed to your account and stored only in this browser.</p>
+        <input id="key-input" type="password" placeholder="sk-ant-… · sk-… · AIza… · sk-or-… · gsk_…" autocomplete="off" spellcheck="false" />
+        <input id="model-input" type="text" placeholder="model (optional — e.g. gpt-4o, gemini-2.0-flash)" autocomplete="off" spellcheck="false" />
         <div class="kp-row">
           <button id="key-save">Save key</button>
           <button id="key-clear" class="ghost">Clear</button>
         </div>
         <div id="key-status"></div>
-        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key → console.anthropic.com</a>
+        <div class="kp-links">
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic</a>
+          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">OpenAI</a>
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google</a>
+          <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter</a>
+        </div>
       </div>
     </div>
 
