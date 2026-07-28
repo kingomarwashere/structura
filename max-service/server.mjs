@@ -23,7 +23,8 @@ function runClaude(prompt, system) {
       cwd: "/tmp", env: process.env,
     });
     let out = "", err = "";
-    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("claude timed out")); }, 210000);
+    // Kill a stalled stream fast so we can retry within the client's window.
+    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("claude timed out")); }, 130000);
     child.stdout.on("data", d => (out += d));
     child.stderr.on("data", d => (err += d));
     child.on("close", (code) => {
@@ -48,6 +49,36 @@ let active = 0;
 
 const readBody = (req) => new Promise((resolve) => { let b = ""; req.on("data", c => (b += c)); req.on("end", () => resolve(b)); });
 
+// Pull a plausible design object out of the model text (tolerates fences, prose,
+// trailing commas). Used only to decide whether to retry — the Worker re-parses.
+function extractJSON(text) {
+  if (!text) return null;
+  let s = String(text).trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  if (a < 0 || b < 0) return null;
+  const body = s.slice(a, b + 1);
+  try { return JSON.parse(body); } catch {}
+  try { return JSON.parse(body.replace(/,\s*([}\]])/g, "$1")); } catch {}
+  return null;
+}
+// Haiku via Claude Code occasionally returns empty/prose/truncated output, or the
+// stream stalls (times out) — retry once on any of those.
+async function generateValidated(prompt, system) {
+  let last = "", lastErr = null;
+  for (let i = 0; i < 2; i++) {
+    try {
+      last = await runClaude(prompt, system);
+      if (extractJSON(last)?.name) return last;
+      console.log(`[retry] attempt ${i + 1} unparseable (len=${last.length})`);
+    } catch (e) {
+      lastErr = e;
+      console.log(`[retry] attempt ${i + 1} threw: ${e.message}`);
+    }
+  }
+  if (last) return last;                 // let the Worker try to parse / error gracefully
+  throw lastErr || new Error("no output");
+}
+
 http.createServer(async (req, res) => {
   const send = (status, obj) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
   const url = new URL(req.url, "http://localhost");
@@ -67,7 +98,7 @@ http.createServer(async (req, res) => {
     const t0 = Date.now();
     active++;
     console.log(`[job ${id.slice(0, 8)}] start (active=${active}) prompt=${prompt.length}b system=${(system || "").length}b`);
-    runClaude(prompt, system)
+    generateValidated(prompt, system)
       .then(text => { jobs.set(id, { status: "done", text, t: Date.now() }); console.log(`[job ${id.slice(0, 8)}] done in ${Date.now() - t0}ms out=${text.length}b`); })
       .catch(e => { jobs.set(id, { status: "error", error: String(e.message || e).slice(0, 400), t: Date.now() }); console.log(`[job ${id.slice(0, 8)}] error: ${e.message}`); })
       .finally(() => { active--; });

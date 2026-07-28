@@ -84,7 +84,7 @@ function startProgress(estimate) {
 async function pollMax(jobId) {
   const stop = startProgress(75);
   try {
-    const deadline = Date.now() + 240000;
+    const deadline = Date.now() + 320000;   // allows one server-side retry (~130s each)
     while (Date.now() < deadline) {
       await sleep(3000);
       let d;

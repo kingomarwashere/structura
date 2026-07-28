@@ -200,7 +200,9 @@ function parseSpec(text) {
   let s = String(text).trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
   const a = s.indexOf("{"), b = s.lastIndexOf("}");
   if (a < 0 || b < 0) return null;
-  try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
+  const body = s.slice(a, b + 1);
+  try { return JSON.parse(body); } catch {}
+  try { return JSON.parse(body.replace(/,\s*([}\]])/g, "$1")); } catch { return null; }  // tolerate trailing commas
 }
 
 const maxUrl = (env) => env.MAX_SERVICE_URL.replace(/\/$/, "");
@@ -215,9 +217,9 @@ roof:{type:"gable"|"skillion"|"flat"|"hip", pitchDeg(num), overhang(num), ridgeA
 walls:{thickness(num), material(str), colorHex(str), openWalls:[] (or subset of "front"|"back"|"left"|"right" for open-sided carports/pavilions)},
 openings:[{wall:"front"|"back"|"left"|"right", type:"door"|"window"|"rollerDoor"|"garage"|"opening", width(num), height(num), sillHeight(num), offset(num, -1=auto), count(int), storey(int)}],
 structure:{system(str), baySpacing(num), columnSize(str), rafterSize(str), foundation:"slab"|"piers"|"strip"},
-billOfMaterials:[{category(str), item(str), spec(str), qty(num), unit(str), material(str), notes(str)}] (8-12 key items only),
-engineeringNotes:[str] (<=4), compliance:[str] (<=4).
-front=-Z, back=+Z, left=-X, right=+X. Every key required. Be concise and fast — do NOT pad.`;
+billOfMaterials:[{category(str), item(str), spec(str), qty(num), unit(str), material(str), notes(str)}] (8-10 key items),
+engineeringNotes:[str] (<=3 short), compliance:[str] (<=3 short).
+front=-Z, back=+Z, left=-X, right=+X. Every key required. summary = ONE short sentence; keep EVERY string short (no long paragraphs). For non-building things (pools, ponds, fountains, sculptures, walls, decks) still fill the schema sensibly — use flat/skillion roof or minimal wallHeight, buildingType names the thing, and put decorative/special features in engineeringNotes. Be fast — do NOT pad.`;
 
 // Owner-only fallback: generate via the owner's Claude Max (Claude Code headless)
 // behind their tunnel. Async: start a job, return its id; the client polls status.
