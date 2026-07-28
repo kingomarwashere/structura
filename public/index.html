@@ -51,6 +51,16 @@
         </div>
         <div id="key-status"></div>
         <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key → console.anthropic.com</a>
+        <details id="owner-box">
+          <summary>Owner: use my Claude Max instead</summary>
+          <p>Personal backup — routes generation to Claude Code on your Max plan, no API key needed. Requires your local service + tunnel running.</p>
+          <input id="owner-input" type="password" placeholder="owner secret" autocomplete="off" spellcheck="false" />
+          <div class="kp-row">
+            <button id="owner-save">Enable</button>
+            <button id="owner-clear" class="ghost">Turn off</button>
+          </div>
+          <div id="owner-status"></div>
+        </details>
       </div>
     </div>
 

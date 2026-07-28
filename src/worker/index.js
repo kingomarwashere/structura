@@ -194,23 +194,81 @@ async function handleDesignDelete(env, uid, id) {
   return json({ ok: true });
 }
 
+// Pull a JSON object out of free-form model text (strip fences / prose).
+function parseSpec(text) {
+  if (!text) return null;
+  let s = String(text).trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  if (a < 0 || b < 0) return null;
+  try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
+}
+
+const maxUrl = (env) => env.MAX_SERVICE_URL.replace(/\/$/, "");
+
+// Owner-only fallback: generate via the owner's Claude Max (Claude Code headless)
+// behind their tunnel. Async: start a job, return its id; the client polls status.
+async function generateViaMax(env, userContent) {
+  const system = `${SYSTEM_PROMPT}\n\nBE CONCISE AND FAST: billOfMaterials = 8–12 key line items only; engineeringNotes ≤ 4 short points; compliance ≤ 4 items; keep every string terse. Do NOT pad.\n\nReturn ONLY a single JSON object — no markdown, no code fences, no commentary — matching this JSON Schema, with every required field present:\n${JSON.stringify(BUILDING_SCHEMA)}`;
+  let resp;
+  try {
+    resp = await fetch(maxUrl(env) + "/start", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-secret": env.MAX_SERVICE_SECRET || "" },
+      body: JSON.stringify({ prompt: userContent, system }),
+    });
+  } catch {
+    return json({ error: "max_unreachable", message: "Your Claude Max backup isn't reachable — is the service running on your Mac?" }, 502);
+  }
+  if (!resp.ok) return json({ error: "max_error", message: "Claude Max backup error (start): " + (await resp.text()).slice(0, 160) }, 502);
+  const { jobId } = await resp.json();
+  if (!jobId) return json({ error: "max_error", message: "Claude Max backup didn't start a job." }, 502);
+  return json({ pending: true, jobId });
+}
+
+// Poll a Max job (owner-gated).
+async function handleMaxStatus(request, env) {
+  const ownerSecret = (request.headers.get("x-owner-secret") || "").trim();
+  if (!(ownerSecret && env.OWNER_SECRET && ownerSecret === env.OWNER_SECRET && env.MAX_SERVICE_URL))
+    return json({ error: "unauthorized" }, 401);
+  const jobId = new URL(request.url).searchParams.get("jobId");
+  if (!jobId) return json({ error: "missing jobId" }, 400);
+  let resp;
+  try {
+    resp = await fetch(maxUrl(env) + "/result?id=" + encodeURIComponent(jobId), { headers: { "x-secret": env.MAX_SERVICE_SECRET || "" } });
+  } catch {
+    return json({ error: "max_unreachable", message: "Your Claude Max backup isn't reachable." }, 502);
+  }
+  if (resp.status === 404) return json({ error: "job_gone", message: "That design job expired — try again." }, 404);
+  if (!resp.ok) return json({ error: "max_error", message: "Claude Max backup error." }, 502);
+  const data = await resp.json();
+  if (data.status === "pending") return json({ pending: true });
+  if (data.status === "error") return json({ error: "max_error", message: "Claude Max backup error: " + (data.error || "").slice(0, 160) }, 502);
+  const spec = parseSpec(data.text);
+  if (!spec) return json({ error: "max_parse", message: "Claude Max returned output I couldn't parse as a design — try again." }, 502);
+  return json({ spec });
+}
+
 async function handleDesign(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
   const prompt = (body.prompt || "").toString().trim();
   if (!prompt) return json({ error: "Missing prompt" }, 400);
 
-  // BYOK: prefer the user's own Anthropic key (never stored or logged), else the server key.
+  const userContent = body.current
+    ? `Here is the existing design as JSON:\n\n${JSON.stringify(body.current)}\n\nApply this change and return the full updated design:\n${prompt}`
+    : prompt;
+
+  // Auth priority: user's own Anthropic key → owner's Claude Max backup → shared server key.
   const userKey = (request.headers.get("x-user-key") || "").trim();
+  const ownerSecret = (request.headers.get("x-owner-secret") || "").trim();
+  const useMax = !userKey && ownerSecret && env.OWNER_SECRET && ownerSecret === env.OWNER_SECRET && env.MAX_SERVICE_URL;
+  if (useMax) return generateViaMax(env, userContent);
+
   const apiKey = userKey || env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return json({ error: "no_key", keyIssue: true,
       message: "Add your Anthropic API key to generate designs — it runs on your own account. Tap the 🔑 Key button." }, 400);
   }
-
-  const userContent = body.current
-    ? `Here is the existing design as JSON:\n\n${JSON.stringify(body.current)}\n\nApply this change and return the full updated design:\n${prompt}`
-    : prompt;
 
   const payload = {
     model: MODEL,
@@ -270,6 +328,7 @@ export default {
     const path = url.pathname;
 
     if (path === "/api/design" && request.method === "POST") return handleDesign(request, env);
+    if (path === "/api/design/status" && request.method === "GET") return handleMaxStatus(request, env);
     if (path === "/api/health") return json({ ok: true, model: MODEL });
 
     // Saved designs (D1) — anonymous uid cookie, created on first save.

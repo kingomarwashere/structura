@@ -46,7 +46,42 @@ $("#btn-key").addEventListener("click", () => { const p = $("#key-panel"); if (p
 $("#key-close").addEventListener("click", () => { $("#key-panel").hidden = true; });
 $("#key-save").addEventListener("click", () => { setKey($("#key-input").value.trim()); $("#key-status").textContent = "Saved — you're ready to design."; });
 $("#key-clear").addEventListener("click", () => { setKey(""); $("#key-input").value = ""; });
+
+// Owner-only: use the owner's Claude Max backup (no API key needed)
+const OWNER_LS = "structura_owner";
+const getOwner = () => { try { return localStorage.getItem(OWNER_LS) || ""; } catch { return ""; } };
+function setOwner(v) { try { v ? localStorage.setItem(OWNER_LS, v) : localStorage.removeItem(OWNER_LS); } catch {} updateOwnerUI(); }
+function updateOwnerUI() {
+  const on = !!getOwner();
+  $("#owner-status").textContent = on ? "✓ Claude Max backup enabled — no API key needed." : "Off — using your API key.";
+  $("#owner-input").value = getOwner();
+  if (on) $("#owner-box").open = true;
+}
+$("#owner-save").addEventListener("click", () => { setOwner($("#owner-input").value.trim()); });
+$("#owner-clear").addEventListener("click", () => { setOwner(""); $("#owner-input").value = ""; });
 updateKeyUI();
+updateOwnerUI();
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Poll the owner's Claude Max job until it produces a spec (or errors / times out).
+async function pollMax(jobId) {
+  const owner = getOwner();
+  const deadline = Date.now() + 240000;
+  let elapsed = 0;
+  while (Date.now() < deadline) {
+    await sleep(3000);
+    elapsed += 3;
+    setBusy(true, `Designing on your Claude Max… (${elapsed}s)`);
+    let d;
+    try {
+      const r = await fetch("/api/design/status?jobId=" + encodeURIComponent(jobId), { headers: owner ? { "x-owner-secret": owner } : {} });
+      d = await r.json();
+    } catch { continue; }
+    if (d.spec) return d.spec;
+    if (d.error) { if (d.keyIssue) openKeyPanel(d.message); throw new Error(d.message || d.error); }
+  }
+  throw new Error("Timed out waiting for Claude Max.");
+}
 
 async function design(prompt) {
   if (busy || !prompt.trim()) return;
@@ -56,10 +91,14 @@ async function design(prompt) {
   setBusy(true, spec ? "Revising the design…" : "Engineering your design…");
   showScreen("view");   // reveal the stage so the loading spinner is visible on mobile
   try {
-    const userKey = getKey();
+    const userKey = getKey(), owner = getOwner();
     const res = await fetch("/api/design", {
       method: "POST",
-      headers: { "content-type": "application/json", ...(userKey ? { "x-user-key": userKey } : {}) },
+      headers: {
+        "content-type": "application/json",
+        ...(userKey ? { "x-user-key": userKey } : {}),
+        ...(owner ? { "x-owner-secret": owner } : {}),
+      },
       body: JSON.stringify({ prompt, current: spec || undefined }),
     });
     const data = await res.json();
@@ -67,7 +106,7 @@ async function design(prompt) {
       if (data.keyIssue) openKeyPanel(data.message);
       throw new Error(data.message || data.detail || data.error || ("HTTP " + res.status));
     }
-    spec = data.spec;
+    spec = data.pending ? await pollMax(data.jobId) : data.spec;
     render(spec);
     addMsg("bot", escapeHtml(spec.summary || "Design ready.") +
       `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m · ${escapeHtml(spec.structure?.system || "")}</div>`);
@@ -150,7 +189,7 @@ showScreen("design");
 function intro() {
   if (chat.children.length) return;
   addMsg("bot", "Describe any structure — a shed, house, warehouse, carport or piece of infrastructure — and I'll engineer it into a 3D model, blueprints and a parts list. Tap an example below, or type your own.");
-  if (!getKey())
+  if (!getKey() && !getOwner())
     addMsg("bot", "First, tap <b>🔑 Key</b> and add your own Anthropic API key — designs run on your account (free to create, a few cents each).");
 }
 intro();
