@@ -123,7 +123,7 @@ async function design(prompt) {
     spec = data.pending ? await pollMax(data.jobId) : data.spec;
     render(spec);
     addMsg("bot", escapeHtml(spec.summary || "Design ready.") +
-      `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m · ${escapeHtml(spec.structure?.system || "")}</div>`);
+      `<div style="margin-top:6px;font-size:12px;color:var(--muted);font-family:var(--ui)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m · ${escapeHtml(spec.structure?.system || "")}</div>`);
     saveDesign(prompt);
     showScreen("view");
   } catch (e) {
@@ -266,7 +266,7 @@ async function openDesign(id) {
       render(spec);
       chat.innerHTML = "";
       addMsg("bot", escapeHtml(spec.summary || spec.name || "Loaded design.") +
-        `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m</div>`);
+        `<div style="margin-top:6px;font-size:12px;color:var(--muted);font-family:var(--ui)">${escapeHtml(spec.buildingType || "")} · ${fmt(spec.footprint.width)}×${fmt(spec.footprint.length)}m</div>`);
       $("#designs-drawer").hidden = true;
       $("#mode-hint").textContent = "Ask for changes to refine it.";
       showScreen("view");
