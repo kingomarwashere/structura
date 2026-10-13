@@ -16,7 +16,7 @@ function mats(spec) {
     roller: new THREE.MeshStandardMaterial({ color: "#b7bcc2", roughness: 0.5, metalness: 0.4 }),
     slab: new THREE.MeshStandardMaterial({ color: "#8f8d88", roughness: 0.95 }),
     floor: new THREE.MeshStandardMaterial({ color: "#d8cfc0", roughness: 0.9 }),
-    frame: new THREE.MeshStandardMaterial({ color: "#FF2D55", roughness: 0.4, metalness: 0.5 }),
+    frame: new THREE.MeshStandardMaterial({ color: "#ff0099", roughness: 0.4, metalness: 0.5 }),
     post: new THREE.MeshStandardMaterial({ color: "#5a5d62", roughness: 0.5, metalness: 0.35 }),
   };
 }
